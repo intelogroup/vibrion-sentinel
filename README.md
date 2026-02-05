@@ -1,16 +1,16 @@
-# 🛡️ Vibrion Sentinel v2.0 (Public Release)
-
 <div align="center">
   <img src="assets/logo.png" alt="Vibrion Sentinel Logo" width="200" />
+  
+  # Vibrion Sentinel v2.0 (Public Release)
+  
+  **Clinical-Grade Genomic Surveillance for Cholera in Resource-Constrained Settings**
+  
+  *Built upon the [CholeraSeq pipeline](https://ceri-krisp.github.io/CholeraSeq/installation.html) — advancing open-source cholera genomics.*
+  
+  [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+  
+  > *"Read Rescue" + "Local-First Philosophy" + "Forensic Gold Standard"*
 </div>
-
-**Clinical-Grade Genomic Surveillance for Cholera in Resource-Constrained Settings**
-
-*Built upon the [CholeraSeq pipeline](https://ceri-krisp.github.io/CholeraSeq/installation.html) — advancing open-source cholera genomics.*
-
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-
-> *"Read Rescue" + "Local-First Philosophy" + "Forensic Gold Standard"*
 
 ---
 
