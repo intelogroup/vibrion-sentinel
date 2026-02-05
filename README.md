@@ -1,7 +1,6 @@
 <div align="center">
-  <img src="assets/logo.png" alt="Vibrion Sentinel Logo" width="32" />
   
-  # Vibrion Sentinel v2.0 (Public Release)
+  # <img src="assets/logo.png" alt="Vibrion Sentinel Logo" width="32" style="margin-right: 10px; vertical-align: middle;" /> Vibrion Sentinel v2.0 (Public Release)
   
   **Clinical-Grade Genomic Surveillance for Cholera in Resource-Constrained Settings**
   
