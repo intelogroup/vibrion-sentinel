@@ -1,0 +1,43 @@
+# Single Sample Test - DRR296286
+samples_dir: "data/raw_reads"
+output_dir: "data/pipeline_output"
+reference_dir: "data/references"
+global_references_dir: "data/global_references"
+
+# Databases
+kraken_db: "data/kraken2_standard_8gb"
+serogroup_db: "data/kraken2_serogroup"
+mmseqs_db: "data/mmseqs_db/swissprot"
+
+# Configuration
+hostile_index: "human-t2t-hla-argos985"
+vibrio_taxid: 662
+threads: 4
+memory_mb: 8000
+aligner_type: "bwa"
+pipeline_mode: "LABORATORY_FULL"
+
+# AI API
+evo2_api: "https://evo2-api.wenglab.org"
+evo2_batch_size: 10000
+
+# Reference Genomes
+reference_genome: "data/references/N16961.fasta"
+reference_annotation: "data/references/N16961.gff"
+
+# AMR Detection
+amr_db: "data/amr_db"
+
+# Phage Detection
+phage_sentinels:
+  - "CTX"
+  - "ICP1"
+
+# Samples
+samples:
+  - "DRR296286"
+
+# Run Parameters
+batch_name: "DRR296286_test"
+run_date: "2026-02-01"
+description: "DRR296286 sample analysis"

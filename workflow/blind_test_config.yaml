@@ -1,0 +1,21 @@
+# Haiti Real API Configuration
+samples_dir: "data/blind_test/raw_reads"
+output_dir: "data/blind_test/results"
+reference_dir: "data/references"
+kraken_db: "data/kraken2_standard_8gb"
+hostile_index: "human-t2t-hla-argos985"
+vibrio_taxid: 662
+nvidia_api_key: "${NVIDIA_API_KEY}"
+evo2_url: "https://health.api.nvidia.com/v1/biology/arc/evo2-40b/generate"
+mongodb_url: "mongodb+srv://jimkalinov_db_user:vhHRL3y1w9LTJFZm@vibrionsentinelcluster.ll6hjn5.mongodb.net/vibrion_db?retryWrites=true&w=majority&appName=vibrionSentinelCluster"
+threads: 4
+memory_mb: 8000
+samples:
+  - SRR22028835_1
+  - SRR22035170_1
+  - SRR8364312_1
+  - SRR8364344_1
+  - SRR073556_1
+  - SRR21789170_1
+  - SRR27991387
+  - SRR11838355

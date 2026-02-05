@@ -1,0 +1,8 @@
+name: kraken2-env
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - kraken2>=2.1.3
+  - pigz>=2.8
+  - python>=3.10

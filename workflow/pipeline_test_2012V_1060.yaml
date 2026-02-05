@@ -1,0 +1,13 @@
+samples:
+  SRR773398:
+    raw_reads: "data/raw_reads/SRR773398.fastq.gz"
+    paired: false
+
+samples_dir: "data/raw_reads"
+output_dir: "data/pipeline_output"
+
+reference_genome: "data/reference_genomes/GCF_000006745.1_ASM674v1_genomic.fna"
+
+kraken2_db: "data/kraken2_standard_8gb"
+
+threads: 4

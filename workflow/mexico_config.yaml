@@ -1,0 +1,25 @@
+# Mexico Analysis Config
+# Sample: SRR32555125 (Human clinical from Mexico, Released 2025)
+# Run: snakemake --configfile workflow/mexico_config.yaml
+
+# Input/Output Paths
+samples_dir: "data/raw_reads"
+output_dir: "results/mexico"
+reference_dir: "data/references"
+
+# Resources
+kraken_db: "data/kraken2_standard_8gb"
+hostile_index: "human-t2t-hla-argos985"
+vibrio_taxid: 662
+
+# API
+nvidia_api_key: "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"
+evo2_url: "https://health.api.nvidia.com/v1/biology/arc/evo2-40b/generate"
+
+# Analysis
+threads: 4
+memory_mb: 8000
+
+# Samples
+samples:
+  - SRR32555125

@@ -1,0 +1,682 @@
+"""
+Vibrion Sentinel Pipeline: Snakemake Workflow
+CDC-compliant cholera surveillance for Haiti
+"""
+
+import os
+
+configfile: "workflow/config/config.yaml"
+
+# Wildcard constraints
+wildcard_constraints:
+    sample="[A-Za-z0-9_]+"
+
+# Target rule - what we want to produce
+rule all:
+    input:
+        expand(
+            "{output_dir}/{sample}/08_comprehensive_report/surveillance_report.md",
+            output_dir=config["output_dir"],
+            sample=config["samples"]
+        ),
+        expand(
+            "{output_dir}/{sample}/07_triage/triage_decision.json",
+            output_dir=config["output_dir"],
+            sample=config["samples"]
+        )
+
+# Rule 1: Remove human DNA contamination with Hostile
+rule hostile_clean:
+    input:
+        fastq="{samples_dir}/{{sample}}.fastq.gz".format(samples_dir=config["samples_dir"])
+    output:
+        cleaned="{output_dir}/{{sample}}/01_hostile/{{sample}}_clean.fastq.gz".format(
+            output_dir=config["output_dir"]
+        ),
+        stats="{output_dir}/{{sample}}/01_hostile/stats.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.cleaned),
+        index=config["hostile_index"]
+    threads: config["threads"]
+    conda:
+        "envs/hostile.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/hostile.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        mkdir -p {params.outdir}
+        
+        if command -v hostile >/dev/null 2>&1; then
+            echo "✅ Hostile found. Running primary decontamination..."
+            hostile clean \
+                --fastq1 {input.fastq} \
+                --output {params.outdir} \
+                --threads {threads} \
+                --index {params.index} \
+                2>&1 | tee {log}
+            
+            # Find the output file (Hostile adds suffixes)
+            mv {params.outdir}/*clean*.fastq.gz {output.cleaned} 2>/dev/null || true
+        elif command -v minimap2 >/dev/null 2>&1 && [ -f data/references/human.mmi ]; then
+            echo "⚠️ Hostile missing. Using Minimap2 fallback (Biological Reverse Selection)..."
+            minimap2 -ax sr -t {threads} data/references/human.mmi {input.fastq} 2>> {log} | \
+                samtools fastq -f 4 - 2>> {log} | gzip -c > {output.cleaned}
+        else
+            echo "🚨 WARNING: No decontamination tools or indices found. PASSING RAW DATA (NOT RECOMMENDED)."
+            cp {input.fastq} {output.cleaned}
+        fi
+        
+        # Create stats JSON
+        echo '{{"stage": "hostile", "input": "{input.fastq}", "output": "{output.cleaned}", "fallback": "'$(command -v hostile || echo minimap2)'"}}' > {output.stats}
+        """
+
+# Rule 2: Taxonomic classification with Kraken2
+rule kraken2_classify:
+    input:
+        fastq=rules.hostile_clean.output.cleaned
+    output:
+        kraken_out="{output_dir}/{{sample}}/02_kraken2/kraken_output.txt".format(
+            output_dir=config["output_dir"]
+        ),
+        kraken_report="{output_dir}/{{sample}}/02_kraken2/kraken_report.txt".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        db=config["kraken_db"],
+        outdir=lambda wildcards, output: os.path.dirname(output.kraken_out)
+    threads: config["threads"]
+    conda:
+        "envs/kraken2.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/kraken2.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        mkdir -p {params.outdir}
+        
+        kraken2 \
+            --db {params.db} \
+            --threads {threads} \
+            --output {output.kraken_out} \
+            --report {output.kraken_report} \
+            --gzip-compressed \
+            {input.fastq} \
+            2>&1 | tee {log}
+        """
+
+# Rule 3: Extract Vibrio reads only
+rule extract_vibrio:
+    input:
+        kraken_out=rules.kraken2_classify.output.kraken_out,
+        fastq=rules.hostile_clean.output.cleaned
+    output:
+        vibrio_fastq="{output_dir}/{{sample}}/03_vibrio/{{sample}}_vibrio_only.fastq.gz".format(
+            output_dir=config["output_dir"]
+        ),
+        stats="{output_dir}/{{sample}}/03_vibrio/stats.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        taxid=config["vibrio_taxid"],
+        outdir=lambda wildcards, output: os.path.dirname(output.vibrio_fastq)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/extract_vibrio.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/extract_vibrio.py"
+
+# Rule 3a: Extract unclassified reads for EVO2 rescue
+rule extract_unclassified:
+    input:
+        kraken_out=rules.kraken2_classify.output.kraken_out,
+        fastq=rules.hostile_clean.output.cleaned
+    output:
+        unclassified="{output_dir}/{{sample}}/03_rescue/{{sample}}_unclassified.fastq.gz".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.unclassified)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/extract_unclassified.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/extract_unclassified.py"
+
+# Rule 3b: [DISABLED] Embed Vibrio reference genome using EVO2 (Slow local CPU version)
+# rule embed_reference:
+#     input:
+#         reference="data/references/2010EL-1786.fasta"
+#     output:
+#         ref_embedding="data/references/vibrio_reference_embedding.json"
+#     log:
+#         "logs/embed_reference.log"
+#     script:
+#         "scripts/embed_reference.py"
+
+# Rule 3c: [DISABLED] Embed unclassified reads using EVO2 (Slow local CPU version)
+# rule embed_unclassified:
+#     input:
+#         unclassified=rules.extract_unclassified.output.unclassified
+#     output:
+#         embeddings="{output_dir}/{{sample}}/03_rescue/{{sample}}_unclassified_embeddings.npy".format(
+#             output_dir=config["output_dir"]
+#         ),
+#         read_ids="{output_dir}/{{sample}}/03_rescue/{{sample}}_unclassified_ids.json".format(
+#             output_dir=config["output_dir"]
+#         )
+#     log:
+#         "{output_dir}/{{sample}}/logs/embed_unclassified.log".format(output_dir=config["output_dir"])
+#     script:
+#         "scripts/embed_unclassified.py"
+
+# Rule 3d: Fast EVO2-API Rescue (Replaces slow local embedding)
+rule rescue_vibrio_reads:
+    input:
+        unclassified=rules.extract_unclassified.output.unclassified
+    output:
+        rescued="{output_dir}/{{sample}}/03_rescue/{{sample}}_rescued_vibrio.fastq.gz".format(
+            output_dir=config["output_dir"]
+        ),
+        stats="{output_dir}/{{sample}}/03_rescue/rescue_stats.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        confidence_threshold=0.6,
+        max_reads=500,
+        evo2_url="https://health.api.nvidia.com/v1/biology/arc/evo2-7b/generate"  # Using 7B for high-volume rescue
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/rescue_reads.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/evo2_rescue.py"
+
+# Rule 3e: Merge classified + rescued Vibrio reads
+rule merge_vibrio_reads:
+    input:
+        classified=rules.extract_vibrio.output.vibrio_fastq,
+        rescued=rules.rescue_vibrio_reads.output.rescued
+    output:
+        merged="{output_dir}/{{sample}}/03_vibrio/{{sample}}_vibrio_complete.fastq.gz".format(
+            output_dir=config["output_dir"]
+        )
+    log:
+        "{output_dir}/{{sample}}/logs/merge_vibrio.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/merge_vibrio_reads.py"
+
+# Rule 4: Align Vibrio reads to reference genome
+rule align_to_reference:
+    input:
+        vibrio_fastq=rules.merge_vibrio_reads.output.merged,
+        reference="data/references/2010EL-1786.fasta"
+    output:
+        bam="{output_dir}/{{sample}}/04_alignment/{{sample}}_aligned.sorted.bam".format(
+            output_dir=config["output_dir"]
+        ),
+        bai="{output_dir}/{{sample}}/04_alignment/{{sample}}_aligned.sorted.bam.bai".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.bam),
+        mapping_rescue_enabled=config.get("mapping_rescue_enabled", False),
+        mapping_rescue_confidence_threshold=config.get("mapping_rescue_confidence_threshold", 0.6),
+        mapping_rescue_max_reads=config.get("mapping_rescue_max_reads", 5000)
+    threads: config["threads"]
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/align.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        mkdir -p {params.outdir}
+
+        set -euo pipefail
+
+        tmp_bam="{params.outdir}/{wildcards.sample}._tmp.initial.bam"
+        tmp_mapped_bam="{params.outdir}/{wildcards.sample}._tmp.mapped_only.bam"
+        tmp_unmapped_fastq="{params.outdir}/{wildcards.sample}._tmp.unmapped.fastq.gz"
+        tmp_rescued_fastq="{params.outdir}/{wildcards.sample}._tmp.unmapped_rescued.fastq.gz"
+        tmp_rescue_stats="{params.outdir}/{wildcards.sample}._tmp.unmapped_rescue_stats.json"
+        tmp_rescue_log="{params.outdir}/{wildcards.sample}._tmp.unmapped_rescue.log"
+        tmp_rescued_bam="{params.outdir}/{wildcards.sample}._tmp.rescued.bam"
+        
+        # Align with minimap2, convert to BAM, and sort
+        minimap2 -ax sr -t {threads} {input.reference} {input.vibrio_fastq} 2>> {log} | \
+            samtools view -b - | \
+            samtools sort -@ {threads} -o "$tmp_bam" - 2>> {log}
+
+        if [ "{params.mapping_rescue_enabled}" = "True" ]; then
+            echo "[mapping_rescue] enabled: extracting unmapped reads" >> {log}
+
+            # Keep only mapped alignments from the first pass
+            samtools view -b -F 4 "$tmp_bam" > "$tmp_mapped_bam" 2>> {log}
+
+            # Extract unmapped reads as FASTQ
+            samtools fastq -f 4 "$tmp_bam" 2>> {log} | gzip -c > "$tmp_unmapped_fastq"
+
+            if gzip -cd "$tmp_unmapped_fastq" | head -n 1 | grep -q .; then
+                echo "[mapping_rescue] running Evo2 rescue on unmapped reads" >> {log}
+
+                python scripts/evo2_rescue.py \
+                    --input "$tmp_unmapped_fastq" \
+                    --output "$tmp_rescued_fastq" \
+                    --stats "$tmp_rescue_stats" \
+                    --threshold {params.mapping_rescue_confidence_threshold} \
+                    --max-reads {params.mapping_rescue_max_reads} \
+                    --log "$tmp_rescue_log" \
+                    2>> {log}
+
+                if gzip -cd "$tmp_rescued_fastq" | head -n 1 | grep -q .; then
+                    echo "[mapping_rescue] remapping rescued reads" >> {log}
+
+                    minimap2 -ax sr -t {threads} {input.reference} "$tmp_rescued_fastq" 2>> {log} | \
+                        samtools view -b - > "$tmp_rescued_bam" 2>> {log}
+
+                    # Merge mapped-first-pass + rescued-remap, then sort to final BAM
+                    samtools merge -f -@ {threads} - "$tmp_mapped_bam" "$tmp_rescued_bam" 2>> {log} | \
+                        samtools sort -@ {threads} -o {output.bam} - 2>> {log}
+                else
+                    echo "[mapping_rescue] no reads rescued by Evo2; using first-pass mapped reads" >> {log}
+                    samtools sort -@ {threads} -o {output.bam} "$tmp_mapped_bam" 2>> {log}
+                fi
+            else
+                echo "[mapping_rescue] no unmapped reads extracted; using first-pass BAM" >> {log}
+                mv "$tmp_bam" {output.bam}
+            fi
+        else
+            mv "$tmp_bam" {output.bam}
+        fi
+        
+        # Index BAM file
+        samtools index {output.bam} 2>> {log}
+
+        # Best-effort cleanup
+        rm -f "$tmp_mapped_bam" "$tmp_rescued_bam" "$tmp_unmapped_fastq" "$tmp_rescued_fastq" \
+              "$tmp_rescue_stats" "$tmp_rescue_log" "$tmp_bam" 2>/dev/null || true
+        """
+
+# Rule 4b: Verify coverage integrity (wbeT focus)
+rule verify_coverage_integrity:
+    input:
+        bam=rules.align_to_reference.output.bam,
+        bai=rules.align_to_reference.output.bai
+    output:
+        report="{output_dir}/{{sample}}/04_alignment/coverage_integrity.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        target_region="CP003069.1:2678187-2678980", # wbeT in Haiti 2010L-1786
+        outdir=lambda wildcards, output: os.path.dirname(output.report)
+    conda:
+        "envs/analysis.yaml" 
+    shell:
+        """
+        python3 scripts/check_coverage_integrity.py \
+            --bam {input.bam} \
+            --output {output.report} \
+            --target-region {params.target_region} \
+            --target-name wbeT
+        """
+
+# Rule 5: Call variants (SNPs/indels) from alignment
+rule call_variants:
+    input:
+        bam=rules.align_to_reference.output.bam,
+        bai=rules.align_to_reference.output.bai,
+        reference="data/references/2010EL-1786.fasta"
+    output:
+        vcf="{output_dir}/{{sample}}/05_variants/{{sample}}_variants.vcf.gz".format(
+            output_dir=config["output_dir"]
+        ),
+        vcf_idx="{output_dir}/{{sample}}/05_variants/{{sample}}_variants.vcf.gz.tbi".format(
+            output_dir=config["output_dir"]
+        ),
+        snp_report="{output_dir}/{{sample}}/05_variants/snp_report.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.vcf)
+    threads: config["threads"]
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/variant_calling.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/call_variants.py"
+
+# Rule 6: Structural variant validation (CTXφ, VPI-1, SXT element)
+rule validate_structural_variants:
+    input:
+        bam=rules.align_to_reference.output.bam,
+        bai=rules.align_to_reference.output.bai,
+        vcf=rules.call_variants.output.vcf,
+        reference="data/references/2010EL-1786.fasta"
+    output:
+        report="{output_dir}/{{sample}}/05_structural/structural_validation.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        collection_year=2021,  # TODO: Extract from metadata
+        outdir=lambda wildcards, output: os.path.dirname(output.report)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/structural_validation.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        mkdir -p {params.outdir}
+        
+        # Decompress VCF if needed
+        if [[ {input.vcf} == *.gz ]]; then
+            gunzip -c {input.vcf} > {params.outdir}/temp.vcf
+            vcf_file="{params.outdir}/temp.vcf"
+        else
+            vcf_file="{input.vcf}"
+        fi
+        
+        python3 scripts/validate_structural_variants.py \
+            --bam {input.bam} \
+            --vcf "$vcf_file" \
+            --reference {input.reference} \
+            --collection-year {params.collection_year} \
+            --output {output.report} \
+            2>&1 | tee {log}
+        
+        # Cleanup temp file
+        rm -f {params.outdir}/temp.vcf
+        """
+
+# Rule 7: Detect AMR genes and virulence factors
+rule detect_amr:
+    input:
+        vibrio_fastq=rules.extract_vibrio.output.vibrio_fastq
+    output:
+        amr_report="{output_dir}/{{sample}}/06_amr/amr_report.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.amr_report)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/amr_detection.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/detect_amr.py"
+
+# Rule 7: Generate consensus genome from BAM
+rule generate_consensus:
+    input:
+        bam=rules.align_to_reference.output.bam,
+        reference="data/references/2010EL-1786.fasta"
+    output:
+        fasta="{output_dir}/{{sample}}/09_consensus/{{sample}}_consensus.fasta".format(
+            output_dir=config["output_dir"]
+        ),
+        summary="{output_dir}/{{sample}}/09_consensus/consensus_generation_summary.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.fasta),
+        sample_id=lambda wildcards: wildcards.sample
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/generate_consensus.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python3 scripts/generate_consensus_genome.py \
+            --bam {input.bam} \
+            --ref {input.reference} \
+            --outdir {params.outdir} \
+            --sample {params.sample_id} \
+            2>&1 | tee {log}
+        """
+
+# Rule 8: Extract surveillance loci sequences from CONSENSUS genome
+rule extract_surveillance_loci:
+    input:
+        reference=rules.generate_consensus.output.fasta,
+        bed="data/references/surveillance_loci.bed"
+    output:
+        loci_fasta="{output_dir}/{{sample}}/05_loci/surveillance_loci.fasta".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.loci_fasta)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/extract_loci.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/extract_loci.py"
+
+# Rule 8b: Extract baseline surveillance loci from REFERENCE genome (once)
+rule extract_reference_loci:
+    input:
+        reference="data/references/2010EL-1786.fasta",
+        bed="data/references/surveillance_loci.bed"
+    output:
+        loci_fasta="{output_dir}/{{sample}}/05_loci/reference_loci.fasta".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.loci_fasta)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/extract_reference_loci.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/extract_loci.py"
+
+# Rule 10: Universal Serogroup & Metabolic Grounding
+rule detect_serogroup:
+    input:
+        vibrio_fastq=rules.merge_vibrio_reads.output.merged
+    output:
+        report="{output_dir}/{{sample}}/02_serogroup/serogroup_report.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        db=config.get("serogroup_db", "data/kraken2_serogroup"),
+        outdir=lambda wildcards, output: os.path.dirname(output.report)
+    conda:
+        "envs/analysis.yaml"
+    threads: config["threads"]
+    log:
+        "{output_dir}/{{sample}}/logs/detect_serogroup.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python3 scripts/detect_serogroup.py \
+            {input.vibrio_fastq} \
+            --db {params.db} \
+            --threads {threads} \
+            --output {output.report} \
+            2>&1 | tee {log}
+        """
+
+# Rule 10b: Strain Triage Alert (High-Speed Early Classifier)
+rule strain_triage:
+    input:
+        report=rules.detect_serogroup.output.report
+    output:
+        decision="{output_dir}/{{sample}}/07_triage/triage_decision.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        sample_id=lambda wildcards: wildcards.sample
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/strain_triage.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        python3 scripts/strain_triage_alert.py \
+            --serogroup {input.report} \
+            --output {output.decision} \
+            --sample {params.sample_id} \
+            2>&1 | tee {log}
+        """
+
+# Rule 9: Evo2 Sentinel Analysis (Delta-Anomaly)
+rule evo2_analyze:
+    input:
+        loci_fasta=rules.extract_surveillance_loci.output.loci_fasta,
+        ref_loci=rules.extract_reference_loci.output.loci_fasta,
+        triage=rules.strain_triage.output.decision
+    output:
+        result="{output_dir}/{{sample}}/07_evo2/evo2_analysis.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        sample_id=lambda wildcards: wildcards.sample,
+        evo2_url=config["evo2_url"]
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/evo2_analyze.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/run_evo2.py"
+
+
+
+# Rule 11: Phenotypic Prediction (Rugose State)
+rule predict_phenotype:
+    input:
+        vibrio_fastq=rules.merge_vibrio_reads.output.merged,
+        reference="data/references/2010EL-1786.fasta"
+    output:
+        report="{output_dir}/{{sample}}/06_phenotype/phenotype_report.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.report)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/predict_phenotype.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python3 scripts/phenotypic_prediction.py \
+            {input.vibrio_fastq} \
+            --ref {input.reference} \
+            --output {output.report} \
+            2>&1 | tee {log}
+        """
+
+# Rule 12: Phage Sentinel Monitoring
+rule phage_sentinel:
+    input:
+        kraken_report=rules.kraken2_classify.output.kraken_report
+    output:
+        report="{output_dir}/{{sample}}/02_phage/phage_report.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.report)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/phage_sentinel.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python3 scripts/phage_sentinel.py \
+            --input {input.kraken_report} \
+            --output {output.report} \
+            2>&1 | tee {log}
+        """
+
+# Rule 9: Generate comprehensive surveillance report
+rule generate_comprehensive_report:
+    input:
+        evo2_result=rules.evo2_analyze.output.result,
+        snp_report=rules.call_variants.output.snp_report,
+        structural_report=rules.validate_structural_variants.output.report,
+        amr_report=rules.detect_amr.output.amr_report,
+        vibrio_stats=rules.extract_vibrio.output.stats,
+        serogroup_report=rules.detect_serogroup.output.report,
+        phenotype_report=rules.predict_phenotype.output.report,
+        phage_report=rules.phage_sentinel.output.report,
+        vcf=rules.call_variants.output.vcf,
+        triage=rules.strain_triage.output.decision,
+        coverage_integrity=rules.verify_coverage_integrity.output.report,
+        phylo_tree="{output_dir}/{{sample}}/10_phylogeny/tree.nwk".format(output_dir=config["output_dir"]),
+        rgi_report=rules.detect_amr_rgi.output.report
+    output:
+        report="{output_dir}/{{sample}}/08_comprehensive_report/surveillance_report.md".format(
+            output_dir=config["output_dir"]
+        ),
+        json="{output_dir}/{{sample}}/08_comprehensive_report/surveillance_report.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        sample_id=lambda wildcards: wildcards.sample,
+        outdir=lambda wildcards, output: os.path.dirname(output.report)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/comprehensive_report.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/generate_comprehensive_report.py"
+
+# --- Phase 3: Visual Phylogenetics (Permissive Stack) ---
+
+# Rule 13: Permissive Phylogeny (Biopython + MAFFT)
+# Replaces Augur/IQ-TREE with MIT/BSD compliant stack.
+rule permissive_phylogeny:
+    input:
+        consensus=rules.generate_consensus.output.fasta
+    output:
+        tree_nwk="{output_dir}/{{sample}}/10_phylogeny/tree.nwk".format(
+            output_dir=config["output_dir"]
+        ),
+        tree_xml="{output_dir}/{{sample}}/10_phylogeny/tree.xml".format(
+            output_dir=config["output_dir"]
+        ),
+        tree_png="{output_dir}/{{sample}}/10_phylogeny/tree.png".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.tree_nwk),
+        sample_id=lambda wildcards: wildcards.sample
+    conda:
+        "envs/analysis.yaml" # Uses Biopython + Mafft (BSD)
+    threads: config["threads"]
+    shell:
+        """
+        python3 workflow/scripts/permissive_phylogeny.py \
+            --consensus {input.consensus} \
+            --sample-id {params.sample_id} \
+            --outdir {params.outdir} \
+            --threads {threads}
+        """
+
+# --- Phase 3b: Deep AMR Profiling (RGI) ---
+
+# Rule 14: Predict Antibiotic Resistance with RGI (Deep Phenotyping)
+rule detect_amr_rgi:
+    input:
+        consensus=rules.generate_consensus.output.fasta
+    output:
+        report="{output_dir}/{{sample}}/06_amr/rgi_report.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.report)
+    conda:
+        "envs/amr_rgi.yaml"
+    threads: config["threads"]
+    shell:
+        """
+        python3 scripts/detect_amr_rgi.py \
+            --consensus {input.consensus} \
+            --output {output.report} \
+            --threads {threads}
+        """

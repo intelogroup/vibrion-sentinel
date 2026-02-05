@@ -1,0 +1,25 @@
+# Bangladesh 2023 Analysis Config
+# Sample: SRR31650318 (Clinical O1 from Dhaka, March 2023)
+# Run: snakemake --configfile workflow/bangladesh_2023_config.yaml
+
+# Input/Output Paths
+samples_dir: "data/raw_reads"
+output_dir: "results/bangladesh_2023"
+reference_dir: "data/references"
+
+# Resources
+kraken_db: "data/kraken2_standard_8gb"
+hostile_index: "human-t2t-hla-argos985"
+vibrio_taxid: 662
+
+# API
+nvidia_api_key: "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"
+evo2_url: "https://health.api.nvidia.com/v1/biology/arc/evo2-40b/generate"
+
+# Analysis
+threads: 4
+memory_mb: 8000
+
+# Samples
+samples:
+  - SRR31650318

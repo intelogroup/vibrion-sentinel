@@ -1,0 +1,34 @@
+# Haiti Resurgence Test - SRR22283995
+# Run from project root: snakemake --configfile workflow/haiti_resurgence_test.yaml --use-conda --cores 4
+
+# Input/Output Paths (relative to project root)
+samples_dir: "data/raw_reads"
+output_dir: "data/pipeline_output"
+reference_dir: "data/references"
+
+# Kraken2 Database
+kraken_db: "data/kraken2_standard_8gb"
+
+# MMseqs2 Database (for rescue)
+mmseqs_db: "data/mmseqs_db/swissprot"
+mmseqs_min_seq_id: 0.8
+
+# Hostile Configuration
+hostile_index: "human-t2t-hla-argos985"
+
+# Taxonomic Filtering
+vibrio_taxid: 662
+
+# API Configuration
+nvidia_api_key: "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"
+evo2_url: "https://health.api.nvidia.com/v1/biology/arc/evo2-40b/generate"
+
+# Analysis Parameters
+threads: 4
+memory_mb: 8000
+aligner_type: "bwa"
+mapping_rescue_enabled: True
+
+# Samples to process
+samples:
+  - SRR22283995

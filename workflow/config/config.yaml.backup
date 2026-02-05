@@ -1,0 +1,29 @@
+# Vibrion Pipeline Configuration
+samples_dir: data/raw_genomes
+output_dir: data/pipeline_output
+reference_dir: data/references
+
+# Tier 1: Kraken2 (Fast k-mer filter)
+kraken_db: data/kraken2_standard_8gb
+serogroup_db: data/kraken2_serogroup
+
+# Tier 2: Deep Rescue (MMseqs2 - Mutation Tolerant)
+mmseqs_db: data/mmseqs_db/swissprot
+mmseqs_threads: 4
+mmseqs_min_seq_id: 0.8 # Lower identity for mutated rescue
+
+# Tier 3: Pre-Filter + Evo2 (Specialist pathogenicity analysis)
+snpeff_db: Vibrio_cholerae_o1_str_2010el_1786 # Matches 2010EL-1786 reference
+
+# Consensus generation mode
+pipeline_mode: "LABORATORY_FULL"  # or "FIELD_RAPID"
+evo2_url: https://health.api.nvidia.com/v1/biology/arc/evo2-40b/generate
+# NVIDIA API Key (Required for 40B Model)
+# nvidia_api_key: "nvapi-..."
+
+# General settings
+hostile_index: human-t2t-hla-argos985
+vibrio_taxid: 662
+threads: 4
+memory_mb: 8000
+samples: ["Bangladesh_O139_Challenge"]

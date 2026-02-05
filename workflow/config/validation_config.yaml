@@ -1,0 +1,11 @@
+samples:
+  - SRR23509888
+  - SRR23509871
+  - SRR22265446
+
+samples_dir: "data/raw_reads/validation"
+output_dir: "data/pipeline_output/validation_run"
+
+# Ensure references are set correctly (defaults in main config should hold, but we can override)
+hostile_index: "human-t2t-hla"
+kraken_db: "data/references/kraken2_vibrion"

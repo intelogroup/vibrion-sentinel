@@ -1,0 +1,13 @@
+name: amr-rgi-env
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+  - python>=3.9
+  - diamond
+  - prodigal
+  - blast
+  - zlib
+  - pip
+  - pip:
+      - rgi

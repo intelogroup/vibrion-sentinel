@@ -1,0 +1,140 @@
+# Mixed Ogawa/Inaba Test Configuration
+# Tests the pipeline's ability to detect co-infection with mixed serotypes
+# Run from project root: snakemake --configfile workflow/mixed_test_config.yaml --cores 4
+
+# Input/Output Paths
+samples_dir: "data/raw_reads"
+output_dir: "data/pipeline_output"
+reference_dir: "data/references"
+global_references_dir: "data/global_references"
+reference_library_dir: "data/reference_library"
+
+global_lineages:
+  [
+    "haiti-2010",
+    "haiti-2022",
+    "yemen-2017",
+    "india-wave3",
+    "bangladesh-xdr-2023",
+    "peru-wasa",
+    "novc-decoy",
+  ]
+
+# NOVC Environmental References
+novc_references_enabled: True
+novc_reference_dir: "data/reference_library/novc_environmental"
+novc_reference_strains:
+  - NOVC13
+  - NOVC03
+  - NOVC05
+  - RFB16
+  - NOVC07
+
+# Kraken2 Databases
+kraken_db: "data/kraken2_haiti_custom"
+kraken_broad_db: "data/kraken2_standard_8gb"
+serogroup_db: "data/kraken2_serogroup"
+
+# MMseqs2 Configuration
+mmseqs_db: "data/mmseqs_db/swissprot"
+mmseqs_min_seq_id: 0.8
+mmseqs_mapping_rescue_enabled: True
+
+# Alignment Configuration
+aligner_type: "bwa"
+snpeff_db: "Vibrio_cholerae_o1_str_2010el_1786"
+
+# Pipeline Mode
+pipeline_mode: "LABORATORY_FULL"
+
+# API Configuration
+nvidia_api_key: "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"
+
+# Reporting Configuration
+reporting:
+  format: "comprehensive"
+  include_visualizations: true
+  delta_detection: true
+  serotype_override_check: true
+
+# VCF Analysis Configuration
+vcf_analysis:
+  min_depth: 10
+  min_quality: 20
+  heterozygous_threshold: 0.2  # Detect mixed calls with AF between 0.2-0.8
+
+# Variant Calling Configuration
+variant_calling:
+  min_depth: 10
+  min_quality: 20
+  call_heterozygous: true  # Enable heterozygous calling for mixed detection
+
+# Assembly Configuration
+assembly:
+  assembler: "spades"
+  kmer_sizes: [21, 33, 55, 77]
+  careful_mode: true
+
+# Quality Control
+qc:
+  min_read_length: 50
+  min_quality_score: 20
+  trim_adapters: true
+
+# Coverage Thresholds
+coverage:
+  min_genome_coverage: 10
+  min_gene_coverage: 5
+  warn_low_coverage: 20
+
+# AMR Detection
+amr:
+  enabled: true
+  databases: ["ncbi", "card"]
+  min_identity: 90
+  min_coverage: 80
+
+# Virulence Factor Detection
+virulence:
+  enabled: true
+  check_ctxAB: true
+  check_tcpA: true
+  check_toxR: true
+  check_toxT: true
+  check_zot: true
+  check_ace: true
+
+# Serotype Detection
+serotype:
+  check_wbeT: true
+  check_heterozygosity: true  # CRITICAL: Enable mixed serotype detection
+  detect_hikojima: true  # Detect rare Hikojima (Ogawa+Inaba) serotype
+  vcf_required: true  # Require VCF for heterozygosity analysis
+
+# Phylogenetic Analysis
+phylo:
+  enabled: true
+  method: "iqtree"
+  bootstrap: 100
+
+# Metadata
+metadata:
+  project: "Mixed Serotype Detection Test"
+  description: "Validation test for Ogawa/Inaba co-infection detection"
+  sequencing_platform: "Illumina"
+  expected_result: "Mixed Ogawa/Inaba (Hikojima-like)"
+
+# Performance
+threads: 4
+memory_gb: 16
+
+# Sample List - Mixed Ogawa/Inaba test sample
+samples:
+  - "mixed_ogawa_inaba"
+
+# Expected Validation Results
+validation:
+  expect_o1: true
+  expect_mixed_serotype: true
+  expect_heterozygous_wbeT: true
+  expect_both_ogawa_and_inaba_markers: true
