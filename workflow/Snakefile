@@ -1169,7 +1169,7 @@ rule evo2_analyze:
     params:
         sample_id=lambda wildcards: wildcards.sample,
         evo2_url=config.get("evo_api_url"),
-        api_key=config.get("nvidia_api_key")
+        api_key=os.environ.get("NVIDIA_API_KEY", "")
     conda:
         "envs/analysis.yaml"
     log:
