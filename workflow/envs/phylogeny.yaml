@@ -1,0 +1,26 @@
+name: phylogeny-env
+channels:
+  - bioconda
+  - conda-forge
+  - r
+  - defaults
+dependencies:
+  # Phylogenetics tools
+  - augur
+  - iqtree>=2.2
+  - mafft>=7.520
+  - treetime>=0.11
+  
+  # Python
+  - python>=3.10
+  - biopython>=1.81
+  
+  # R and visualization
+  - r-base>=4.2
+  - bioconductor-ggtree>=3.8
+  - bioconductor-treeio>=1.24
+  - r-ape>=5.7
+  - r-ggplot2>=3.4
+  - r-jsonlite>=1.8
+  - r-dplyr>=1.1
+

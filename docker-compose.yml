@@ -1,0 +1,72 @@
+# Vibrion Sentinel - Docker Compose Stack
+# Single-command deployment for cholera surveillance pipeline
+
+services:
+  # MongoDB for data storage (GridFS)
+  mongodb:
+    image: mongo:7.0
+    container_name: vibrion-mongodb
+    restart: unless-stopped
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: vibrion
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vibrion-net
+
+  # Main pipeline runner
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vibrion-pipeline
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    volumes:
+      - ./data/raw_reads:/data/input:ro
+      - ./data/pipeline_output:/output
+      - ./data/global_references:/app/data/global_references:ro
+      - ./logs:/app/logs
+    environment:
+      - VIBRION_MONGO_URI=mongodb://mongodb:27017/vibrion
+      - VIBRION_LOG_LEVEL=INFO
+      - VIBRION_MODE=fast_triage
+    networks:
+      - vibrion-net
+    command: ["--input", "/data/input", "--output", "/output"]
+
+  # FastAPI backend (optional, for REST API access)
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vibrion-api
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      - VIBRION_MONGO_URI=mongodb://mongodb:27017/vibrion
+      - VIBRION_LOG_LEVEL=INFO
+    networks:
+      - vibrion-net
+    command: ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    profiles:
+      - api  # Only start with: docker-compose --profile api up
+
+volumes:
+  mongodb_data:
+    driver: local
+
+networks:
+  vibrion-net:
+    driver: bridge

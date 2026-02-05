@@ -1,0 +1,10 @@
+name: hostile-env
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - dnaio
+  - hostile>=2.0.2
+  - minimap2>=2.26
+  - samtools>=1.18
+  - python>=3.10

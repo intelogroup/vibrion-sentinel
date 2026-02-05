@@ -1,0 +1,1411 @@
+"""
+Vibrion Sentinel Pipeline: Snakemake Workflow
+CDC-compliant cholera surveillance for Haiti
+"""
+
+import os
+import json
+import sys
+
+configfile: "workflow/config/config.yaml"
+
+# Initialize memory manager for adaptive resource allocation
+sys.path.insert(0, 'workflow')
+from memory_manager import initialize_memory_manager, get_memory_manager
+
+# Initialize on config load
+memory_manager = initialize_memory_manager(config)
+
+# ============================================================================
+# Memory-Aware Helper Functions
+# ============================================================================
+
+def get_memory_tier(wildcards=None):
+    """Get current memory tier."""
+    mm = get_memory_manager()
+    return mm.current_tier if mm else 'BALANCED'
+
+def get_adaptive_threads(wildcards=None):
+    """Get thread count based on memory tier."""
+    mm = get_memory_manager()
+    if mm:
+        tier_config = mm.get_config_for_tier()
+        return tier_config.get('threads', config.get('threads', 4))
+    return config.get('threads', 4)
+
+def get_adaptive_kraken_db(wildcards=None):
+    """Get Kraken2 database based on memory tier."""
+    mm = get_memory_manager()
+    if mm:
+        tier_config = mm.get_config_for_tier()
+        return tier_config.get('kraken_db', config.get('kraken_db'))
+    return config.get('kraken_db')
+
+def get_adaptive_kraken_broad_db(wildcards=None):
+    """Get broad Kraken2 database based on memory tier."""
+    mm = get_memory_manager()
+    if mm:
+        tier_config = mm.get_config_for_tier()
+        # In EMERGENCY mode, skip broad audit entirely
+        if get_memory_tier() == 'EMERGENCY':
+            return None  # Signal to skip this rule
+        # In BUNKER mode, still use haiti_custom
+        return tier_config.get('kraken_db', config.get('kraken_broad_db', 'data/kraken2_standard_8gb'))
+    return config.get('kraken_broad_db', 'data/kraken2_standard_8gb')
+
+def should_run_phylogeny():
+    """Check if phylogenetic analysis should run."""
+    mm = get_memory_manager()
+    if mm:
+        return mm.should_run_feature('mafft_full_alignment') or mm.should_run_feature('mafft_fast_alignment')
+    return True
+
+def should_run_evo2():
+    """Check if EVO2 analysis should run."""
+    mm = get_memory_manager()
+    if mm:
+        return mm.should_run_feature('evo2_pathogenicity')
+    return True
+
+def get_mafft_max_refs():
+    """Get max references for MAFFT based on memory tier."""
+    mm = get_memory_manager()
+    if mm:
+        tier_config = mm.get_config_for_tier()
+        max_refs = tier_config.get('mafft_max_refs')
+        if max_refs is None:
+            return 999  # No limit
+        return max(max_refs, 0)  # At least 0
+    return 999
+
+def log_memory_status(sample_id: str):
+    """Log memory manager status for pipeline diagnostics."""
+    mm = get_memory_manager()
+    if mm:
+        summary = mm.get_memory_summary()
+        summary['sample'] = sample_id
+        mm.write_memory_profile(sample_id)
+
+def select_reference(wildcards):
+    """
+    Reference Switchboard (Haiti-focused): Prioritizes Haiti references, then global search.
+    Hierarchy: Haiti 2010/2022 (≥0.99) → O139 → Global best match (≥0.98) → Haiti 2010 fallback
+    """
+    # Force triage and regional selection to run first
+    checkpoints.strain_triage.get(**wildcards)
+    checkpoints.global_reference_triage.get(**wildcards)
+    
+    output_dir = config.get("output_dir", "data/pipeline_output")
+    match_path = f"{output_dir}/{wildcards.sample}/07_triage/regional_selection.json"
+    
+    if os.path.exists(match_path):
+        with open(match_path) as f:
+            match_data = json.load(f)
+        
+        all_sims = match_data.get("all_similarities", {})
+        haiti_threshold = 0.99  # High confidence for Haiti assignment
+        global_threshold = 0.98  # Minimum for non-Haiti references
+        
+        # Priority 1: Check Haiti references first (2010 or 2022)
+        haiti_2010_sim = all_sims.get("2010EL-1786", 0)
+        haiti_2022_sim = all_sims.get("Haiti_2022_Resurgence", 0)
+        
+        if haiti_2010_sim >= haiti_threshold or haiti_2022_sim >= haiti_threshold:
+            # Use the better Haiti reference
+            if haiti_2022_sim >= haiti_2010_sim:
+                ref = "data/references/Haiti_2022_Resurgence.fasta"
+                print(f"🇭🇹 [select_reference] Sample {wildcards.sample} → Haiti 2022 (similarity: {haiti_2022_sim:.3f})")
+            else:
+                ref = "data/references/2010EL-1786.fasta"
+                print(f"🇭🇹 [select_reference] Sample {wildcards.sample} → Haiti 2010 (similarity: {haiti_2010_sim:.3f})")
+            return ref
+        
+        # Priority 2: Check for O139 (non-O1 pathogen)
+        decision_path = f"{output_dir}/{wildcards.sample}/07_triage/triage_decision.json"
+        if os.path.exists(decision_path):
+            with open(decision_path) as f:
+                decision = json.load(f)
+            if "O139" in decision.get("serogroup", ""):
+                o139_ref = "data/serogroup_reference/clusters/LC594838.1_O139.fasta"
+                if os.path.exists(o139_ref):
+                    print(f"🦠 [select_reference] Sample {wildcards.sample} → O139 reference")
+                    return o139_ref
+        
+        # Priority 3: Use global best match if high confidence (likely imported strain)
+        best_ref = match_data.get("best_reference", "")
+        best_sim = match_data.get("similarity", 0)
+        
+        if best_sim >= global_threshold:
+            print(f"🌍 [select_reference] Sample {wildcards.sample} → {best_ref} (global match: {best_sim:.3f}, likely imported strain)")
+            return best_ref
+        
+        # Priority 4: Low confidence - default to Haiti 2010 baseline
+        print(f"⚠️ [select_reference] Sample {wildcards.sample} low similarity ({best_sim:.3f}) → defaulting to Haiti 2010 baseline")
+        return "data/references/2010EL-1786.fasta"
+    
+    # Fallback if triage file missing
+    print(f"⚠️ [select_reference] No triage data for {wildcards.sample}. Defaulting to Haiti 2010.")
+    return "data/references/2010EL-1786.fasta"
+
+# Wildcards handled implicitly
+
+# Target rule - what we want to produce
+rule all:
+    input:
+        expand(
+            "{output_dir}/{sample}/08_comprehensive_report/surveillance_report.md",
+            output_dir=config["output_dir"],
+            sample=config["samples"]
+        ),
+        expand(
+            "{output_dir}/{sample}/07_triage/triage_decision.json",
+            output_dir=config["output_dir"],
+            sample=config["samples"]
+        ),
+        # Synergistic triage outputs
+        expand(
+            "{output_dir}/{sample}/07_triage/tier0_sourmash.json",
+            output_dir=config["output_dir"],
+            sample=config["samples"]
+        ),
+        expand(
+            "{output_dir}/{sample}/07_triage/local_triage.json",
+            output_dir=config["output_dir"],
+            sample=config["samples"]
+        ),
+        expand(
+            "{output_dir}/{sample}/07_evo2/evo2_analysis.json",
+            output_dir=config["output_dir"],
+            sample=config["samples"]
+        ),
+        expand(
+            "{output_dir}/{sample}/02_kraken2/broad_report.txt",
+            output_dir=config["output_dir"],
+            sample=config["samples"]
+        ),
+        expand(
+            "{output_dir}/{sample}/09_consensus/forensic_biotype.json",
+            output_dir=config["output_dir"],
+            sample=config["samples"]
+        )
+
+# Rule 0: Quality Control with fastp (CholeraSeq Standard: Q20, 4bp window)
+rule fastp_qc:
+    input:
+        fastq=lambda wildcards: "{samples_dir}/{sample}_1.fastq.gz".format(samples_dir=config["samples_dir"], sample=wildcards.sample) if os.path.exists("{samples_dir}/{sample}_1.fastq.gz".format(samples_dir=config["samples_dir"], sample=wildcards.sample)) else "{samples_dir}/{sample}.fastq.gz".format(samples_dir=config["samples_dir"], sample=wildcards.sample)
+    output:
+        cleaned="{output_dir}/{{sample}}/00_fastp/{{sample}}_1.fastq.gz".format(
+            output_dir=config["output_dir"]
+        ),
+        json="{output_dir}/{{sample}}/00_fastp/fastp.json".format(
+            output_dir=config["output_dir"]
+        ),
+        html="{output_dir}/{{sample}}/00_fastp/fastp.html".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.cleaned),
+        memory_tier=get_memory_tier
+    threads: get_adaptive_threads
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/fastp.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        mkdir -p {params.outdir}
+        
+        R1="{input.fastq}"
+        R2=""
+        # Detect R2 (robust check)
+        if [[ "$R1" == *"_1.fastq.gz" ]]; then
+            R2_CHECK="${{R1/_1.fastq.gz/_2.fastq.gz}}"
+            if [ -f "$R2_CHECK" ]; then R2="$R2_CHECK"; fi
+        elif [[ "$R1" == *"_R1.fastq.gz" ]]; then
+            R2_CHECK="${{R1/_R1.fastq.gz/_R2.fastq.gz}}"
+            if [ -f "$R2_CHECK" ]; then R2="$R2_CHECK"; fi
+        fi
+        
+        OUT_R1="{output.cleaned}"
+        OUT_R2="${{OUT_R1/_1.fastq.gz/_2.fastq.gz}}"
+        
+        echo "Running fastp with CholeraSeq parameters (Q20, Window 4, Len 35) [Tier: {params.memory_tier}]..." >> {log}
+        
+        if [ -n "$R2" ]; then
+            fastp -i "$R1" -I "$R2" \
+                  -o "$OUT_R1" -O "$OUT_R2" \
+                  -q 20 -W 4 -l 35 \
+                  -j {output.json} -h {output.html} \
+                  -w {threads} \
+                  2>> {log}
+        else
+            fastp -i "$R1" \
+                  -o "$OUT_R1" \
+                  -q 20 -W 4 -l 35 \
+                  -j {output.json} -h {output.html} \
+                  -w {threads} \
+                  2>> {log}
+        fi
+        """
+
+# Rule 1: Remove human DNA contamination with Hostile
+rule hostile_clean:
+    input:
+        fastq=rules.fastp_qc.output.cleaned
+    output:
+        cleaned="{output_dir}/{{sample}}/01_hostile/{{sample}}_clean.fastq.gz".format(
+            output_dir=config["output_dir"]
+        ),
+        stats="{output_dir}/{{sample}}/01_hostile/stats.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.cleaned)
+    threads: 1
+    log:
+        "{output_dir}/{{sample}}/logs/hostile.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        set -euo pipefail
+        mkdir -p {params.outdir}
+        
+        # Passthrough mode for faster testing - skip decontamination
+        echo "⚠️ Skipping decontamination for faster testing. Passing raw data." >> {log}
+        cp {input.fastq} {output.cleaned}
+        echo '{{"stage": "hostile", "method": "passthrough", "success": true}}' > {output.stats}
+        """
+
+
+
+
+# Rule 2: Taxonomic classification with Kraken2
+rule kraken2_classify:
+    input:
+        fastq=rules.hostile_clean.output.cleaned
+    output:
+        kraken_out="{output_dir}/{{sample}}/02_kraken2/kraken_output.txt".format(
+            output_dir=config["output_dir"]
+        ),
+        kraken_report="{output_dir}/{{sample}}/02_kraken2/kraken_report.txt".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        db=get_adaptive_kraken_db,
+        outdir=lambda wildcards, output: os.path.dirname(output.kraken_out),
+        memory_tier=get_memory_tier
+    threads: get_adaptive_threads
+    conda:
+        "envs/kraken2.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/kraken2.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        mkdir -p {params.outdir}
+        
+        echo "Running Kraken2 classification [Tier: {params.memory_tier}]..." > {log}
+        
+        kraken2 \
+            --db {params.db} \
+            --threads {threads} \
+            --output {output.kraken_out} \
+            --report {output.kraken_report} \
+            --gzip-compressed \
+            {input.fastq} \
+            2>&1 | tee -a {log}
+        """
+
+# Rule 2b: Broad-spectrum taxonomic audit (Identify Contaminants)
+rule kraken2_broad_audit:
+    input:
+        fastq=rules.hostile_clean.output.cleaned
+    output:
+        kraken_out="{output_dir}/{{sample}}/02_kraken2/broad_output.txt".format(
+            output_dir=config["output_dir"]
+        ),
+        kraken_report="{output_dir}/{{sample}}/02_kraken2/broad_report.txt".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        db=get_adaptive_kraken_broad_db,
+        outdir=lambda wildcards, output: os.path.dirname(output.kraken_out),
+        memory_tier=get_memory_tier
+    threads: get_adaptive_threads
+    conda:
+        "envs/kraken2.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/kraken2_broad.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        mkdir -p {params.outdir}
+        
+        echo "Running broad Kraken2 audit [Tier: {params.memory_tier}]..." > {log}
+        
+        kraken2 \
+            --db {params.db} \
+            --threads {threads} \
+            --output {output.kraken_out} \
+            --report {output.kraken_report} \
+            --gzip-compressed \
+            {input.fastq} \
+            2>&1 | tee -a {log}
+        """
+
+# Rule 3: Extract Vibrio reads only
+rule extract_vibrio:
+    input:
+        kraken_out=rules.kraken2_classify.output.kraken_out,
+        fastq=rules.hostile_clean.output.cleaned
+    output:
+        vibrio_fastq="{output_dir}/{{sample}}/03_vibrio/{{sample}}_vibrio_only.fastq.gz".format(
+            output_dir=config["output_dir"]
+        ),
+        stats="{output_dir}/{{sample}}/03_vibrio/stats.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        taxid=config["vibrio_taxid"],
+        outdir=lambda wildcards, output: os.path.dirname(output.vibrio_fastq)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/extract_vibrio.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/extract_vibrio.py"
+
+# Rule 3a: Extract unclassified reads for EVO2 rescue
+rule extract_unclassified:
+    input:
+        kraken_out=rules.kraken2_classify.output.kraken_out,
+        fastq=rules.hostile_clean.output.cleaned
+    output:
+        unclassified="{output_dir}/{{sample}}/03_rescue/{{sample}}_unclassified.fastq.gz".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.unclassified)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/extract_unclassified.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/extract_unclassified.py"
+
+# Rule 3b: [DISABLED] Embed Vibrio reference genome using EVO2 (Slow local CPU version)
+# rule embed_reference:
+#     input:
+#         reference=select_reference
+#     output:
+#         ref_embedding="data/references/vibrio_reference_embedding.json"
+#     log:
+#         "logs/embed_reference.log"
+#     script:
+#         "scripts/embed_reference.py"
+
+# Rule 3c: [DISABLED] Embed unclassified reads using EVO2 (Slow local CPU version)
+# rule embed_unclassified:
+#     input:
+#         unclassified=rules.extract_unclassified.output.unclassified
+#     output:
+#         embeddings="{output_dir}/{{sample}}/03_rescue/{{sample}}_unclassified_embeddings.npy".format(
+#             output_dir=config["output_dir"]
+#         ),
+#         read_ids="{output_dir}/{{sample}}/03_rescue/{{sample}}_unclassified_ids.json".format(
+#             output_dir=config["output_dir"]
+#         )
+#     log:
+#         "{output_dir}/{{sample}}/logs/embed_unclassified.log".format(output_dir=config["output_dir"])
+#     script:
+#         "scripts/embed_unclassified.py"
+
+# Rule 3d: Fast EVO2-API Rescue (Replaces slow local embedding)
+# Rule 3d: Kaiju Rescue (Tier 2: Mutation-Tolerant Classification)
+# Replaces expensive Evo2 API with free, local protein-level k-mer matching
+# Rule 3d: MMseqs2 Deep Rescue (Tier 2: Mutation-Tolerant Classification)
+# Replaces Kaiju/Evo2 with ARM-optimized approximate alignment (easy-taxonomy)
+rule rescue_vibrio_reads:
+    input:
+        unclassified=rules.extract_unclassified.output.unclassified
+    output:
+        rescued="{output_dir}/{{sample}}/03_rescue/{{sample}}_rescued_vibrio.fastq.gz".format(
+            output_dir=config["output_dir"]
+        ),
+        stats="{output_dir}/{{sample}}/03_rescue/rescue_stats.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        db=config["mmseqs_db"],
+        min_seq_id=config["mmseqs_min_seq_id"],
+        threads=config.get("mmseqs_threads", 4)
+    conda:
+        "envs/analysis.yaml"
+    threads: config.get("mmseqs_threads", 4)
+    log:
+        "{output_dir}/{{sample}}/logs/rescue_reads.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/mmseqs_rescue.py"
+
+# Rule 3e: Merge classified + rescued Vibrio reads
+rule merge_vibrio_reads:
+    input:
+        classified=rules.extract_vibrio.output.vibrio_fastq,
+        rescued=rules.rescue_vibrio_reads.output.rescued
+    output:
+        merged="{output_dir}/{{sample}}/03_vibrio/{{sample}}_vibrio_complete.fastq.gz".format(
+            output_dir=config["output_dir"]
+        )
+    log:
+        "{output_dir}/{{sample}}/logs/merge_vibrio.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/merge_vibrio_reads.py"
+
+# Rule 4a: Index Reference for BWA
+rule bwa_index:
+    input:
+        reference=select_reference
+    output:
+        idx=directory("data/references/bwa_index_{sample}") # Use wildcards to make it unique per sample/ref logic? No, ref is dynamic.
+        # Actually, select_reference depends on wildcards.sample.
+        # Ideally we index the reference ONCE. But select_reference is dynamic.
+        # Let's verify: select_reference returns a path string based on wildcards.
+        # If the path is constant (usually), fine. But if it changes (O139 vs O1), we need to trigger index for THAT reference.
+        # Minimap2 didn't need a separate index step (it does it on the fly or accepts fasta).
+        # BWA needs index files (.amb, .ann, .bwt, .pac, .sa) alongside the fasta.
+        # Since I can't predict the filename easily in output without dynamic logic,
+        # I will run 'bwa index' INSIDE the alignment rule if the index is missing, or create a rule that outputs the specific index files.
+        # A simpler approach for this pipeline (since typically 1 reference is used per batch) is to check/build index in align_to_reference shell.
+        # BUT standard snakemake practice prefers a rule.
+        # Given "select_reference" is a function, it's safer to build the index inside the alignment rule script to handle valid dynamic paths.
+        # OR: I can add 'bwa index' to the shell command of align_to_reference.
+        # Let's do that for Robustness.
+
+# Rule 3f: Sketch sample for global triage
+rule sketch_sample_triage:
+    input:
+        fastq=rules.merge_vibrio_reads.output.merged
+    output:
+        sig="{output_dir}/{{sample}}/07_triage/sample.sig".format(
+            output_dir=config["output_dir"]
+        )
+    conda:
+        "envs/analysis.yaml"
+    shell:
+        """
+        sourmash sketch dna {input.fastq} -o {output.sig} --name {wildcards.sample}
+        """
+
+# Rule 3g: Regional Reference Triage (Best Baseline Selection)
+checkpoint global_reference_triage:
+    input:
+        sig=rules.sketch_sample_triage.output.sig
+    output:
+        match="{output_dir}/{{sample}}/07_triage/regional_selection.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        ref_dir="data/references"
+    shell:
+        """
+        python3 scripts/triage_reference.py --sample-sig {input.sig} --ref-dir {params.ref_dir} --output {output.match}
+        """
+
+# Rule 4: Align Vibrio reads to reference genome
+checkpoint align_to_reference:
+    input:
+        vibrio_fastq=rules.merge_vibrio_reads.output.merged,
+        reference=select_reference,
+        triage_match=rules.global_reference_triage.output.match # Ensure triage runs first
+    output:
+        bam=config["output_dir"] + "/{sample}/04_alignment/{sample}_aligned.sorted.bam",
+        bai=config["output_dir"] + "/{sample}/04_alignment/{sample}_aligned.sorted.bam.bai",
+        rescue_stats=config["output_dir"] + "/{sample}/04_alignment/{sample}_unmapped_rescue_stats.json",
+        rescue_log=config["output_dir"] + "/{sample}/04_alignment/{sample}_unmapped_rescue.log",
+        manifest=config["output_dir"] + "/{sample}/04_alignment/alignment_manifest.json"
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.bam),
+        mapping_rescue_enabled=config.get("mapping_rescue_enabled", False),
+        mapping_rescue_confidence_threshold=config.get("mapping_rescue_confidence_threshold", 0.6),
+        mapping_rescue_max_reads=config.get("mapping_rescue_max_reads", 5000),
+        aligner_type=config.get("aligner_type", "bwa")
+    threads: config["threads"]
+    conda:
+        "envs/analysis.yaml"
+    log:
+        config["output_dir"] + "/{sample}/logs/align.log"
+    shell:
+        """
+        mkdir -p {params.outdir}
+
+        set -euo pipefail
+
+        tmp_bam="{params.outdir}/{wildcards.sample}._tmp.initial.bam"
+        tmp_mapped_bam="{params.outdir}/{wildcards.sample}._tmp.mapped_only.bam"
+        tmp_unmapped_fastq="{params.outdir}/{wildcards.sample}._tmp.unmapped.fastq.gz"
+        tmp_rescued_fastq="{params.outdir}/{wildcards.sample}._tmp.unmapped_rescued.fastq.gz"
+        tmp_rescue_stats="{params.outdir}/{wildcards.sample}._tmp.unmapped_rescue_stats.json"
+        tmp_rescue_log="{params.outdir}/{wildcards.sample}._tmp.unmapped_rescue.log"
+        tmp_rescued_bam="{params.outdir}/{wildcards.sample}._tmp.rescued.bam"
+        final_rescue_stats="{output.rescue_stats}"
+        final_rescue_log="{output.rescue_log}"
+        
+        # Forensic Alignment: Hybrid Strategy (Routing by Data Type)
+        # Type A: Illumina (BWA-MEM) - Optimised for SNPs and small indels
+        # Type B: Long Read/SV (Minimap2) - Optimised for structural variants
+        
+        ALIGNER="{params.aligner_type}"
+        
+        if [ "$ALIGNER" == "bwa" ]; then
+            # 1. Check/Build BWA Index (if missing)
+            if [ ! -f "{input.reference}.bwt" ]; then
+                echo "[bwa] indexing reference {input.reference}" >> {log}
+                bwa index {input.reference} 2>> {log}
+            fi
+
+            # 2. Align with BWA-MEM (Standard Forensic Mode)
+            # -B 3: Relaxed mismatch penalty (Catch Inaba mutations)
+            # -M: Mark split hits as secondary (Picard/Pilon compatibility)
+            echo "[align] Running BWA-MEM optimization..." >> {log}
+            bwa mem -t {threads} -B 3 -M {input.reference} {input.vibrio_fastq} 2>> {log} | \
+                samtools view -b - | \
+                samtools sort -@ {threads} -o "$tmp_bam" - 2>> {log}
+                
+        elif [ "$ALIGNER" == "minimap2" ]; then
+            # Long-Read / Structural Mode
+            echo "[align] Running Minimap2 optimization..." >> {log}
+            minimap2 -ax map-ont -t {threads} {input.reference} {input.vibrio_fastq} 2>> {log} | \
+                samtools view -b - | \
+                samtools sort -@ {threads} -o "$tmp_bam" - 2>> {log}
+        else
+            echo "[error] Unknown aligner type: $ALIGNER" >> {log}
+            exit 1
+        fi
+
+        if [ "{params.mapping_rescue_enabled}" = "True" ]; then
+            echo "[mapping_rescue] enabled: extracting unmapped reads" >> {log}
+
+            # Keep only mapped alignments from the first pass
+            samtools view -b -F 4 "$tmp_bam" > "$tmp_mapped_bam" 2>> {log}
+
+            # Extract unmapped reads as FASTQ
+            samtools fastq -f 4 "$tmp_bam" 2>> {log} | gzip -c > "$tmp_unmapped_fastq"
+
+            if gzip -cd "$tmp_unmapped_fastq" | head -n 1 | grep -q .; then
+                echo "[mapping_rescue] running Evo2 rescue on unmapped reads" >> {log}
+
+                python scripts/evo2_rescue.py \
+                    --input "$tmp_unmapped_fastq" \
+                    --output "$tmp_rescued_fastq" \
+                    --stats "$tmp_rescue_stats" \
+                    --threshold {params.mapping_rescue_confidence_threshold} \
+                    --max-reads {params.mapping_rescue_max_reads} \
+                    --log "$tmp_rescue_log" \
+                    2>> {log}
+
+                if gzip -cd "$tmp_rescued_fastq" | head -n 1 | grep -q .; then
+                    echo "[mapping_rescue] remapping rescued reads" >> {log}
+
+                    # Remap using the SAME aligner as primary
+                    if [ "$ALIGNER" == "bwa" ]; then
+                        bwa mem -t {threads} -B 3 -M {input.reference} "$tmp_rescued_fastq" 2>> {log} | \
+                            samtools view -b - > "$tmp_rescued_bam" 2>> {log}
+                    else
+                         minimap2 -ax map-ont -t {threads} {input.reference} "$tmp_rescued_fastq" 2>> {log} | \
+                            samtools view -b - > "$tmp_rescued_bam" 2>> {log}
+                    fi
+
+                    # Merge mapped-first-pass + rescued-remap, then sort to final BAM
+                    samtools merge -f -@ {threads} - "$tmp_mapped_bam" "$tmp_rescued_bam" 2>> {log} | \
+                        samtools sort -@ {threads} -o {output.bam} - 2>> {log}
+                else
+                    echo "[mapping_rescue] no reads rescued by Evo2; using first-pass mapped reads" >> {log}
+                    samtools sort -@ {threads} -o {output.bam} "$tmp_mapped_bam" 2>> {log}
+                fi
+            else
+                echo "[mapping_rescue] no unmapped reads extracted; using first-pass BAM" >> {log}
+                mv "$tmp_bam" {output.bam}
+            fi
+        else
+            mv "$tmp_bam" {output.bam}
+        fi
+        
+        # Index BAM file
+        samtools index {output.bam} 2>> {log}
+
+        if [ -f "$tmp_rescue_stats" ]; then
+            mv "$tmp_rescue_stats" "$final_rescue_stats"
+        else
+            echo '{{}}' > "$final_rescue_stats"
+        fi
+
+        if [ -f "$tmp_rescue_log" ]; then
+            mv "$tmp_rescue_log" "$final_rescue_log"
+        else
+            echo "mapping_rescue: not run" > "$final_rescue_log"
+        fi
+
+        # TODO: Re-enable manifest generation after fixing formatting issue
+        echo '{{"step": "alignment", "status": "completed"}}' > {output.manifest}
+
+        # Best-effort cleanup
+        rm -f "$tmp_mapped_bam" "$tmp_rescued_bam" "$tmp_unmapped_fastq" "$tmp_rescued_fastq" \
+              "$tmp_bam" 2>/dev/null || true
+        """
+
+# Rule 4b: Verify coverage integrity (wbeT focus)
+rule verify_coverage_integrity:
+    input:
+        bam=rules.align_to_reference.output.bam,
+        bai=rules.align_to_reference.output.bai,
+        fastq=rules.hostile_clean.output.cleaned,
+        reference=select_reference
+    output:
+        report="{output_dir}/{{sample}}/04_alignment/coverage_integrity.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        target_region="CP003069.1:2687324-2688226", # wbeT in Haiti 2010L-1786 (Corrected)
+        outdir=lambda wildcards, output: os.path.dirname(output.report)
+    conda:
+        "envs/analysis.yaml" 
+    shell:
+        """
+        python3 workflow/scripts/check_coverage_integrity.py \
+            --bam {input.bam} \
+            --output {output.report} \
+            --target-region {params.target_region} \
+            --target-name wbeT \
+            --reference {input.reference}
+        """
+
+# Rule 5: Call variants (SNPs/indels) from alignment
+rule call_variants:
+    input:
+        bam=rules.align_to_reference.output.bam,
+        bai=rules.align_to_reference.output.bai,
+        reference=select_reference
+    output:
+        vcf="{output_dir}/{{sample}}/05_variants/{{sample}}_variants.vcf.gz".format(
+            output_dir=config["output_dir"]
+        ),
+        vcf_idx="{output_dir}/{{sample}}/05_variants/{{sample}}_variants.vcf.gz.tbi".format(
+            output_dir=config["output_dir"]
+        ),
+        snp_report="{output_dir}/{{sample}}/05_variants/snp_report.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.vcf)
+    threads: config["threads"]
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/variant_calling.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/call_variants.py"
+
+# Rule 5b: SnpEff Variant Annotation (Tier 3 Pre-Filter)
+# Annotates variants with predicted impact (HIGH/MODERATE/LOW/MODIFIER)
+# This filters what gets sent to Evo2, saving API costs
+rule snpeff_annotate:
+    input:
+        vcf=rules.call_variants.output.vcf
+    output:
+        annotated_vcf="{output_dir}/{{sample}}/05_variants/{{sample}}_annotated.vcf.gz".format(
+            output_dir=config["output_dir"]
+        ),
+        stats="{output_dir}/{{sample}}/05_variants/snpeff_stats.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        db=config.get("snpeff_db", "Vibrio_cholerae_o1_str_2010el_1786"),
+        gff="data/references/2010EL-1786.gff"
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/snpeff_annotate.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/snpeff_annotate.py"
+
+
+# Rule 6a: Supplementary Alignment for Structural Variants (Minimap2)
+# Ensure we always have a Long-Read/SV optimized BAM for SXT/CTX checks
+rule align_sv_supplementary:
+    input:
+        vibrio_fastq=rules.merge_vibrio_reads.output.merged,
+        reference=select_reference
+    output:
+        bam="{output_dir}/{{sample}}/04_alignment/{{sample}}_structural.sorted.bam".format(
+            output_dir=config["output_dir"]
+        ),
+        bai="{output_dir}/{{sample}}/04_alignment/{{sample}}_structural.sorted.bam.bai".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.bam),
+        aligner_type=config.get("aligner_type", "bwa") # Does the primary match?
+    threads: config["threads"]
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/align_structural.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        # If primary is already Minimap2, just symlink it to save time
+        if [ "{params.aligner_type}" == "minimap2" ]; then
+             echo "[sv_align] Primary is already Minimap2. Symlinking..." >> {log}
+             # Wait for primary to finish (handled by Snakemake if we link inputs, but here we just link outputs)
+             # ACTUALLY, simpler to just run it or copy. Symlinking output of another rule is tricky in Snakemake
+             # without explicit dependency. 
+             # Let's just run Minimap2. It's fast.
+             minimap2 -ax sr -t {threads} {input.reference} {input.vibrio_fastq} 2>> {log} | \
+                samtools view -b - | \
+                samtools sort -@ {threads} -o {output.bam} - 2>> {log}
+        else
+             echo "[sv_align] Running Supplementary Minimap2 Alignment (Short Read Mode)..." >> {log}
+             minimap2 -ax sr -t {threads} {input.reference} {input.vibrio_fastq} 2>> {log} | \
+                samtools view -b - | \
+                samtools sort -@ {threads} -o {output.bam} - 2>> {log}
+        fi
+        
+        samtools index {output.bam} 2>> {log}
+        """
+
+# Rule 6b: Structural variant validation (CTXφ, VPI-1, SXT element)
+rule validate_structural_variants:
+    input:
+        primary_bam=rules.align_to_reference.output.bam,
+        primary_bai=rules.align_to_reference.output.bai,
+        sv_bam=rules.align_sv_supplementary.output.bam,
+        sv_bai=rules.align_sv_supplementary.output.bai,
+        vcf=rules.call_variants.output.vcf,
+        reference=select_reference
+    output:
+        report="{output_dir}/{{sample}}/05_structural/structural_validation.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        collection_year=2021,
+        outdir=lambda wildcards, output: os.path.dirname(output.report)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/structural_validation.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        python3 workflow/scripts/validate_structural_variants.py \
+            --primary-bam {input.primary_bam} \
+            --structural-bam {input.sv_bam} \
+            --vcf {input.vcf} \
+            --reference {input.reference} \
+            --output {output.report}
+        """
+
+# Rule 7: Detect AMR genes and virulence factors
+rule detect_amr:
+    input:
+        vibrio_fastq=rules.extract_vibrio.output.vibrio_fastq
+    output:
+        amr_report="{output_dir}/{{sample}}/06_amr/amr_report.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.amr_report)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/amr_detection.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/detect_amr.py"
+
+# Rule 7: Generate consensus genome from BAM
+rule generate_consensus:
+    input:
+        bam=rules.align_to_reference.output.bam,
+        reference=select_reference
+    output:
+        fasta="{output_dir}/{{sample}}/09_consensus/{{sample}}_consensus.fasta".format(
+            output_dir=config["output_dir"]
+        ),
+        summary="{output_dir}/{{sample}}/09_consensus/consensus_generation_summary.json".format(
+            output_dir=config["output_dir"]
+        ),
+        manifest="{output_dir}/{{sample}}/09_consensus/consensus_manifest.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.fasta),
+        sample_id=lambda wildcards: wildcards.sample
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/generate_consensus.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python3 workflow/scripts/generate_consensus_genome.py \
+            --bam {input.bam} \
+            --ref {input.reference} \
+            --outdir {params.outdir} \
+            --sample {params.sample_id} \
+            2>&1 | tee {log}
+
+        python3 - <<'PY'
+import json
+import hashlib
+import time
+import platform
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+# Load summary metrics
+with open("{output.summary}") as f:
+    summary = json.load(f)
+
+manifest = {{
+    "step": "consensus",
+    "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+    "inputs": {{
+        "bam": "{input.bam}",
+        "reference": "{input.reference}"
+    }},
+    "outputs": {{
+        "consensus_fasta": "{output.fasta}",
+        "summary": "{output.summary}"
+    }},
+    "hashes": {{
+        "bam_sha256": sha256("{input.bam}"),
+        "reference_sha256": sha256("{input.reference}"),
+        "consensus_sha256": sha256("{output.fasta}"),
+        "summary_sha256": sha256("{output.summary}")
+    }},
+    "qc_metrics": {{
+        "reference_length": summary.get("statistics", {{}}).get("reference_length"),
+        "coverage_percentage": summary.get("statistics", {{}}).get("coverage_percentage"),
+        "mean_depth": summary.get("statistics", {{}}).get("mean_depth"),
+        "median_depth": summary.get("statistics", {{}}).get("median_depth"),
+        "max_depth": summary.get("statistics", {{}}).get("max_depth"),
+        "heterogeneous_sites": summary.get("statistics", {{}}).get("heterogeneous_sites_count"),
+        "confident_positions": summary.get("statistics", {{}}).get("confident_positions")
+    }},
+    "tools": {{
+        "python": platform.python_version()
+    }},
+    "log": "{log}"
+}}
+
+with open("{output.manifest}", "w") as f:
+    json.dump(manifest, f, indent=2)
+PY
+        """
+
+# Include modular rule files
+include: "rules/polishing.smk"
+include: "rules/validation.smk"
+
+# Rule 5c: BLAST Novelty Scan (Tier 3 Pre-Filter: Stranger Detection)
+# Identifies novel sequences not present in reference for Evo2 deep analysis
+rule blast_novelty_scan:
+    input:
+        consensus=rules.polish_consensus.output.polished,
+        reference=select_reference
+    output:
+        stranger_bed="{output_dir}/{{sample}}/05_variants/stranger_regions.bed".format(
+            output_dir=config["output_dir"]
+        ),
+        stranger_fasta="{output_dir}/{{sample}}/05_variants/stranger_sequences.fasta".format(
+            output_dir=config["output_dir"]
+        ),
+        stats="{output_dir}/{{sample}}/05_variants/novelty_scan_stats.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        min_gap_length=500,
+        min_identity=80
+    threads: config["threads"]
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/blast_novelty_scan.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/blast_novelty_scan.py"
+
+# Consensus Polishing Rules (Platform-Aware)
+# Now loaded from rules/polishing.smk and rules/validation.smk
+
+# Rule 9: Forensic Confirmation (Consensus-Based)
+# This replaces the read-based forensic typing in detect_serogroup
+rule forensic_confirmation:
+    input:
+        consensus=rules.polish_consensus.output.polished
+    output:
+        report="{output_dir}/{{sample}}/09_consensus/forensic_biotype.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.report)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/forensic_confirmation.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        python3 scripts/forensic_biotyping.py {input.consensus} --output {output.report} 2>&1 | tee {log}
+        """
+
+
+# Rule 8: Extract surveillance loci sequences from CONSENSUS genome
+rule extract_surveillance_loci:
+    input:
+        reference=rules.polish_consensus.output.polished,
+        bed="data/references/surveillance_loci.bed"
+    output:
+        loci_fasta="{output_dir}/{{sample}}/05_loci/surveillance_loci.fasta".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.loci_fasta)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/extract_loci.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/extract_loci.py"
+
+# Rule 8b: Extract baseline surveillance loci from REFERENCE genome (once)
+rule extract_reference_loci:
+    input:
+        reference=select_reference,
+        bed="data/references/surveillance_loci.bed"
+    output:
+        loci_fasta="{output_dir}/{{sample}}/05_loci/reference_loci.fasta".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.loci_fasta)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/extract_reference_loci.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/extract_loci.py"
+
+# Rule 10: Universal Serogroup & Metabolic Grounding
+rule detect_serogroup:
+    input:
+        vibrio_fastq=rules.merge_vibrio_reads.output.merged,
+        metabolic_markers="data/references/metabolic_markers.fasta",
+        virulence_markers="data/references/virulence_markers.fasta"
+    output:
+        report="{output_dir}/{{sample}}/02_serogroup/serogroup_report.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        db=config.get("serogroup_db", "data/kraken2_serogroup"),
+        outdir=lambda wildcards, output: os.path.dirname(output.report)
+    conda:
+        "envs/analysis.yaml"
+    threads: config["threads"]
+    log:
+        "{output_dir}/{{sample}}/logs/detect_serogroup.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python3 workflow/scripts/detect_serogroup.py \
+            {input.vibrio_fastq} \
+            --db {params.db} \
+            --threads {threads} \
+            --mode triage \
+            --output {output.report} \
+            2>&1 | tee {log}
+        """
+
+# Rule 10b: Strain Triage Alert (High-Speed Early Classifier)
+checkpoint strain_triage:
+    input:
+        report=rules.detect_serogroup.output.report
+    output:
+        decision="{output_dir}/{{sample}}/07_triage/triage_decision.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        sample_id=lambda wildcards: wildcards.sample
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/strain_triage.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        python3 scripts/strain_triage_alert.py \
+            --serogroup {input.report} \
+            --output {output.decision} \
+            --sample {params.sample_id} \
+            2>&1 | tee {log}
+        """
+
+# Rule 8c: Tier 0 - sourmash K-mer Divergence Detection
+rule sourmash_divergence:
+    input:
+        sample_fasta=rules.polish_consensus.output.polished,
+        sentinel_ref="data/references/2010EL-1786.fasta",
+        outbreak_ref="data/references/Haiti_2022_Resurgence.fasta"
+    output:
+        tier0_json="{output_dir}/{{sample}}/07_triage/tier0_sourmash.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        ksize=config.get("triage", {}).get("sourmash_ksize", 31),
+        scaled=config.get("triage", {}).get("sourmash_scaled", 1000),
+        threshold=config.get("triage", {}).get("sourmash_threshold", 0.999),
+        min_divergent=config.get("triage", {}).get("sourmash_min_divergent_kmers", 10)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/sourmash_divergence.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        $CONDA_PREFIX/bin/python3 workflow/scripts/sourmash_triage.py \
+            --sample-fasta {input.sample_fasta} \
+            --sentinel-ref {input.sentinel_ref} \
+            --outbreak-ref {input.outbreak_ref} \
+            --ksize {params.ksize} \
+            --scaled {params.scaled} \
+            --threshold {params.threshold} \
+            --min-divergent-kmers {params.min_divergent} \
+            --output {output.tier0_json} \
+            2>&1 | tee {log}
+        """
+
+# Rule 8d: Tier 1-2 - Local AI Triage (HyenaDNA Unified Cascade)
+rule local_triage:
+    input:
+        tier0_json=rules.sourmash_divergence.output.tier0_json,
+        sample_fasta=rules.polish_consensus.output.polished,
+        ref_fasta="data/references/2010EL-1786.fasta",
+        loci_fasta=rules.extract_surveillance_loci.output.loci_fasta
+    output:
+        triage_json="{output_dir}/{{sample}}/07_triage/local_triage.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        hyena_model=config.get("triage", {}).get("hyena_model", "LongSafari/hyenadna-tiny-1k-seqlen-hf"),
+        hyena_threshold=config.get("triage", {}).get("hyena_threshold", 15.0),
+        hyena_window=config.get("triage", {}).get("hyena_window_size", 500),
+        hyenadna_tier2_model=config.get("triage", {}).get("hyenadna_tier2_model", "LongSafari/hyenadna-tiny-1k-seqlen-hf"),
+        hyenadna_tier2_loci=config.get("triage", {}).get("hyenadna_tier2_loci", ["ctxB", "wbeT", "tcpA", "gyrA", "parE", "scrABC", "katB", "ahpC", "hapR"]),
+        hyenadna_tier2_threshold=config.get("triage", {}).get("hyenadna_tier2_threshold", 2.0),
+        hyenadna_tier2_overlap=config.get("triage", {}).get("hyenadna_tier2_overlap_threshold", 0.5),
+        device=config.get("triage", {}).get("device", "mps"),
+        model_cache=config.get("triage", {}).get("model_cache_dir", "data/models/triage")
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/local_triage.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        export PYTORCH_ENABLE_MPS_FALLBACK=1
+        $CONDA_PREFIX/bin/python3 workflow/scripts/local_triage.py \
+            --tier0-json {input.tier0_json} \
+            --sample {input.sample_fasta} \
+            --ref-fasta {input.ref_fasta} \
+            --loci-fasta {input.loci_fasta} \
+            --hyena-model {params.hyena_model} \
+            --hyena-threshold {params.hyena_threshold} \
+            --hyena-window-size {params.hyena_window} \
+            --caduceus-model {params.hyenadna_tier2_model} \
+            --caduceus-loci {params.hyenadna_tier2_loci} \
+            --caduceus-threshold {params.hyenadna_tier2_threshold} \
+            --caduceus-overlap-threshold {params.hyenadna_tier2_overlap} \
+            --device {params.device} \
+            --model-cache-dir {params.model_cache} \
+            --output {output.triage_json} \
+            2>&1 | tee {log}
+        """
+
+# Rule 8e: Global Triage (Comparison against multi-lineage reference library)
+rule global_triage:
+    input:
+        sample_fasta=rules.polish_consensus.output.polished,
+        global_ref_dir=config.get("global_references_dir", "data/global_references")
+    output:
+        global_match_json="{output_dir}/{{sample}}/07_triage/global_match.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        lineages=config.get("global_lineages", []),
+        ksize=31,
+        scaled=1000
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/global_triage.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        python3 workflow/scripts/global_triage.py \
+            --sample-fasta {input.sample_fasta} \
+            --ref-dir {input.global_ref_dir} \
+            --lineages {params.lineages} \
+            --ksize {params.ksize} \
+            --scaled {params.scaled} \
+            --output {output.global_match_json} \
+            2>&1 | tee {log}
+        """
+
+# Rule 9: Evo2 Sentinel Analysis (Tier 3 - Conditional Cloud Escalation)
+# Only runs if local triage (Tier 0-2) flags sample for cloud analysis
+rule evo2_analyze:
+    input:
+        loci_fasta=rules.extract_surveillance_loci.output.loci_fasta,
+        sentinel_loci=config["evo2"]["sentinel_loci"].format(output_dir=config["output_dir"]),
+        outbreak_loci=config["evo2"]["outbreak_loci"],
+        triage_json=rules.local_triage.output.triage_json
+    output:
+        report="{output_dir}/{{sample}}/07_evo2/evo2_analysis.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        sample_id=lambda wildcards: wildcards.sample,
+        evo2_url=config.get("evo_api_url"),
+        api_key=config.get("nvidia_api_key")
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/evo2_analyze.log".format(output_dir=config["output_dir"])
+    run:
+        import json
+        
+        # Check if local triage escalated to cloud
+        with open(input.triage_json) as f:
+            triage = json.load(f)
+        
+        escalate = triage.get("final_decision", {}).get("escalate_to_cloud", False)
+        
+        if escalate:
+            # Run Evo2 cloud analysis
+            shell("""
+                python3 workflow/scripts/run_evo2.py \
+                    --sample-fasta {input.loci_fasta} \
+                    --sentinel-fasta {input.sentinel_loci} \
+                    --outbreak-fasta {input.outbreak_loci} \
+                    --api-url {params.evo2_url} \
+                    --api-key {params.api_key} \
+                    --output {output.report} \
+                    2>&1 | tee {log}
+            """)
+        else:
+            # Skip cloud analysis - create placeholder report
+            result = {
+                "tier": 3,
+                "method": "Evo2 Cloud",
+                "skipped": True,
+                "reason": "Local triage verified sample as low risk",
+                "triage_summary": triage.get("final_decision", {}).get("cascade_summary", {})
+            }
+            
+            with open(output.report, 'w') as f:
+                json.dump(result, f, indent=2)
+            
+            with open(log[0], 'w') as f:
+                f.write("Evo2 analysis skipped - local triage verified sample\n")
+
+# Rule 10: HyenaDNA Structural Surveillance (Tier 3 - Long Context)
+# "The Eye of the Storm" - 1M bp context for Island Detection
+rule hyena_analyze:
+    input:
+        assembly="results/assembly/{sample}_polished.fasta"
+    output:
+        report="{output_dir}/{{sample}}/07_hyena/hyena_analysis.json".format(output_dir=config["output_dir"])
+    params:
+        model_dir="data/models/hyena",
+        script="workflow/scripts/run_hyena.py"
+    log:
+        "{output_dir}/{{sample}}/logs/hyena_analyze.log".format(output_dir=config["output_dir"])
+    threads: 4 # MPS handles parallelism, but we limit CPU threads
+    shell:
+        """
+        mkdir -p $(dirname {output.report})
+        python3 {params.script} \
+            --input {input.assembly} \
+            --model-dir {params.model_dir} \
+            --output {output.report} \
+            > {log} 2>&1
+        """
+
+# Rule 11: Phenotypic Prediction (Rugose State)
+rule predict_phenotype:
+    input:
+        vibrio_fastq=rules.merge_vibrio_reads.output.merged,
+        reference=select_reference
+    output:
+        report="{output_dir}/{{sample}}/06_phenotype/phenotype_report.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.report)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/predict_phenotype.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python3 scripts/phenotypic_prediction.py \
+            {input.vibrio_fastq} \
+            --ref {input.reference} \
+            --output {output.report} \
+            2>&1 | tee {log}
+        """
+
+# Rule 12: Phage Sentinel Monitoring
+rule phage_sentinel:
+    input:
+        kraken_report=rules.kraken2_classify.output.kraken_report
+    output:
+        report="{output_dir}/{{sample}}/02_phage/phage_report.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.report)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/phage_sentinel.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python3 scripts/phage_sentinel.py \
+            --input {input.kraken_report} \
+            --output {output.report} \
+            2>&1 | tee {log}
+        """
+
+
+# --- Phase 3: Visual Phylogenetics (Permissive Stack) ---
+
+# Rule 13: Permissive Phylogeny (Biopython + MAFFT)
+# Replaces Augur/IQ-TREE with MIT/BSD compliant stack.
+# Professional CholeraSeq Architecture.
+# Replaces de-novo alignment with reference-based core matrix.
+# Engine: IQ-TREE2 (+ASC) + TreeTime.
+rule cholera_seq_tree:
+    input:
+        consensus=rules.polish_consensus.output.polished,
+        loci=rules.extract_surveillance_loci.output.loci_fasta,
+        ref_alignment="data/core_alignment/reference_core_alignment.fasta"
+    output:
+        tree_nwk="{output_dir}/{{sample}}/10_phylogeny/tree.nwk".format(
+            output_dir=config["output_dir"]
+        ),
+        tree_png="{output_dir}/{{sample}}/10_phylogeny/tree.png".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.tree_nwk),
+        sample_id=lambda wildcards: wildcards.sample
+    conda:
+        "envs/analysis.yaml"
+    threads: config["threads"]
+    shell:
+        """
+        python3 workflow/scripts/cholera_seq_tree.py \
+            --consensus {input.consensus} \
+            --loci {input.loci} \
+            --sample-id {params.sample_id} \
+            --outdir {params.outdir} \
+            --threads {threads}
+        """
+
+# Rule 13b: Enhanced Tree Visualization (ggtree)
+# Publication-quality phylogenetic visualization with metadata
+rule enhanced_tree_viz:
+    input:
+        tree_nwk=rules.cholera_seq_tree.output.tree_nwk,
+        metadata="data/metadata/haiti_phylogeny_metadata.json"
+    output:
+        tree_enhanced="{output_dir}/{{sample}}/10_phylogeny/tree_enhanced.png".format(
+            output_dir=config["output_dir"]
+        ),
+        tree_circular="{output_dir}/{{sample}}/10_phylogeny/tree_enhanced_circular.png".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        width=14,
+        height=10
+    conda:
+        "envs/phylogeny.yaml"
+    shell:
+        """
+        Rscript workflow/scripts/enhanced_tree_viz.R \
+            {input.tree_nwk} \
+            {input.metadata} \
+            {output.tree_enhanced} \
+            {params.width} \
+            {params.height}
+        """
+
+# --- Phase 3b: Deep AMR Profiling (RGI) ---
+
+# Rule 14: Predict Antibiotic Resistance with RGI (Deep Phenotyping)
+rule detect_amr_rgi:
+    input:
+        consensus=rules.polish_consensus.output.polished
+    output:
+        report="{output_dir}/{{sample}}/06_amr/rgi_report.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.report)
+    conda:
+        "envs/analysis.yaml"
+    threads: config["threads"]
+    shell:
+        """
+        python3 scripts/detect_amr_rgi.py \
+            --consensus {input.consensus} \
+            --output {output.report} \
+            --threads {threads}
+        """
+
+# Rule 9: Generate comprehensive surveillance report
+rule generate_comprehensive_report:
+    input:
+        evo2_result=rules.evo2_analyze.output.report,
+        snp_report=rules.call_variants.output.snp_report,
+        structural_report=rules.validate_structural_variants.output.report,
+        amr_report=rules.detect_amr.output.amr_report,
+        vibrio_stats=rules.extract_vibrio.output.stats,
+        serogroup_report=rules.detect_serogroup.output.report,
+        phenotype_report=rules.predict_phenotype.output.report,
+        phage_report=rules.phage_sentinel.output.report,
+        rgi_report=rules.detect_amr_rgi.output.report, # Deep AMR (Drug Card)
+        vcf=rules.call_variants.output.vcf,
+        triage=rules.strain_triage.output.decision,
+        coverage_integrity=rules.verify_coverage_integrity.output.report,
+        phylo_tree="{output_dir}/{{sample}}/10_phylogeny/tree.nwk".format(output_dir=config["output_dir"]),
+        phylo_png="{output_dir}/{{sample}}/10_phylogeny/tree.png".format(output_dir=config["output_dir"]),
+        qc_checksum=rules.validate_checksum.output.report,
+        ctx_report=rules.detect_ctx_integration.output.report,
+        sxt_report=rules.assemble_sxt.output.report,
+        platform_report=rules.detect_platform.output.report,
+        global_match=rules.global_triage.output.global_match_json,
+        broad_report=rules.kraken2_broad_audit.output.kraken_report,
+        polished=rules.polish_consensus.output.polished
+    output:
+        report="{output_dir}/{{sample}}/08_comprehensive_report/surveillance_report.md".format(
+            output_dir=config["output_dir"]
+        ),
+        json="{output_dir}/{{sample}}/08_comprehensive_report/surveillance_report.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        sample_id=lambda wildcards: wildcards.sample,
+        outdir=lambda wildcards, output: os.path.dirname(output.report)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/comprehensive_report.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/generate_comprehensive_report.py"

@@ -1,0 +1,13 @@
+name: polishing_illumina
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pilon=1.24
+  - bwa=0.7.17
+  - samtools=1.19
+  - bcftools=1.19
+  - openjdk=11
+  - biopython=1.83
