@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/logo.png" alt="Vibrion Sentinel Logo" width="200" />
+  <img src="assets/logo.png" alt="Vibrion Sentinel Logo" width="32" />
   
   # Vibrion Sentinel v2.0 (Public Release)
   
