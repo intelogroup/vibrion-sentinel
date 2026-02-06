@@ -160,7 +160,7 @@ Results will be in `data/pipeline_output/YOUR_SAMPLE_ID/`.
 - **⚠️ Decontamination Testing Mode**: Hostile currently in passthrough; needs activation for clinical deployment
 - **⚠️ Limited Assembly Scope**: SPAdes only used for SXT elements, not full genome de novo assembly
 - **⚠️ Cloud Dependency**: Tier 2 requires external API; no offline fallback for deep forensics
-- **⚠️ Tool Inventory Accuracy**: Some listed tools (FMLRC2, Freebayes) not actively used in current pipeline
+- **⚠️ Tool Inventory Accuracy**: Some listed tools (FMLRC2, FreeBayes) not actively used in current pipeline
 
 ### Recommended for Production Deployment?
 **Partial Yes, with modifications:**
