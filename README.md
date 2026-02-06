@@ -74,28 +74,36 @@ Results will be in `data/pipeline_output/YOUR_SAMPLE_ID/`.
 ### 1. Data Pipeline (The "Body")
 *From raw dirty water to a clean forensic genome.*
 
-| Stage | Tool(s) | Function |
-|---|---|---|
-| **0. QC** | **Fastp** | Quality filtering (Q20, 4bp sliding window). |
-| **1. Decontamination** | **Hostile** + **Minimap2** | Removes human/non-target DNA with aggressive short-read mapping. |
-| **2. Classification** | **Kraken2** | Strict k-mer filtering for *Vibrio cholerae* (custom & standard DBs). |
-| **3. Rescue** | **MMseqs2** | **"Read Rescue"**: Recovers mutated reads via protein alignment. |
-| **4. Alignment** | **BWA** + **Minimap2** | Maps cleaned reads to reference genome. |
-| **5. Assembly** | **SPAdes** | Denovo assembly backup if coverage too low. |
-| **6. Consensus** | **Samtools** + **Pilon** | Generates consensus genome with pileup-based calling. |
-| **7. Polishing** | **Medaka** + **Polypolish** + **FMLRC2** | Iterative error correction; Nanopore-aware (medaka) or Illumina-aware (pilon) polishing. |
-| **8. Alignment (Final)** | **MAFFT** | Multiple sequence alignment for phylogenetic and surveillance context. |
-| **9. Variant Calling** | **BCFtools** + **Freebayes** | SNP and indel detection; strain differentiation. |
-| **10. Annotation** | **SnpEff** + **BLAST** | Functional annotation of variants and amr gene detection. |
+| Stage | Tool(s) | Function | Status |
+|---|---|---|---|
+| **0. QC** | **Fastp** | Quality filtering (Q20, 4bp sliding window). | ✅ Production |
+| **1. Decontamination** | **Hostile** + **Minimap2** | Removes human/non-target DNA with aggressive short-read mapping. | ⚠️ Testing Mode* |
+| **2. Classification** | **Kraken2** | Strict k-mer filtering for *Vibrio cholerae* (custom & standard DBs). | ✅ Production |
+| **3. Rescue** | **MMseqs2** | **"Read Rescue"**: Recovers mutated reads via protein alignment. | ✅ Production |
+| **4. Alignment** | **BWA** + **Minimap2** | Maps cleaned reads to reference genome. | ✅ Production |
+| **5. Assembly** | **SPAdes** | Denovo assembly for SXT/ICE elements only (not full genome). | ⚠️ Limited Use* |
+| **6. Consensus** | **Samtools** + **Pilon** | Generates consensus genome with pileup-based calling. | ✅ Production |
+| **7. Polishing** | **Medaka** + **Polypolish** + **Pilon** | Platform-aware polishing: Medaka (Nanopore) or Polypolish→Pilon (Illumina). | ✅ Production |
+| **8. Alignment (Final)** | **MAFFT** | Multiple sequence alignment for phylogenetic and surveillance context. | ✅ Production |
+| **9. Variant Calling** | **BCFtools** | SNP and indel detection; strain differentiation with surveillance loci filtering. | ✅ Production |
+| **10. Annotation** | **SnpEff** + **BLAST** | Functional annotation of variants and amr gene detection. | ✅ Production |
+
+**Implementation Notes:**
+- *Stage 1: Currently in passthrough mode for performance testing; activate for production deployment
+- *Stage 5: SPAdes is used selectively for SXT/ICE element assembly validation, not as a full denovo assembly fallback
+- *Stage 7: FMLRC2 listed in environment but not actively used; Polypolish→Pilon provides robust Illumina polishing
+- *Stage 9: Uses BCFtools mpileup/call with surveillance-aware filtering; Freebayes not currently implemented
 
 ### 2. Intelligence Tiers (The "Brain")
 *From consensus genome to actionable alert.*
 
-| Tier | Method | Function |
-|---|---|---|
-| **Tier 0** | **Sourmash** | **Flash Triage:** Instant k-mer drift check vs 2010/2022 baselines. |
-| **Tier 1** | **HyenaDNA** | **Local AI:** Structural anomaly detection (CPU-optimized, runs locally). |
-| **Tier 2** | **Evo2** (Cloud) | **Deep Forensic:** *Optional* escalation for high-risk variants. |
+| Tier | Method | Function | Deployment |
+|---|---|---|---|
+| **Tier 0** | **Sourmash** | **Flash Triage:** Instant k-mer drift check vs 2010/2022 baselines. | Local (CPU) |
+| **Tier 1** | **HyenaDNA** | **Local AI:** Structural anomaly detection (CPU-optimized, runs locally). | Local (CPU) |
+| **Tier 2** | **Evo2** (Cloud) | **Deep Forensic:** *Optional* escalation for high-risk variants. | Cloud API* |
+
+**Cloud API Note:** Tier 2 requires Evo2 API credentials and may incur costs. Configure fallback behavior in `workflow/config/config.yaml` if cloud access is limited.
 
 ### 3. Supporting Tools
 
@@ -107,7 +115,20 @@ Results will be in `data/pipeline_output/YOUR_SAMPLE_ID/`.
 | **Data Transport** | **Aiohttp** + **Httpx** | Async API calls for cloud functions and remote data retrieval. |
 | **Utilities** | **Biopython** + **Pysam** + **NumPy** | Sequence parsing, SAM/BAM interface, numerical computing. |
 
-### 4. Tools Evaluated But Not Used
+### 4. Development Notes & Evaluated Tools
+
+#### ⚠️ Current Development Status
+
+**Pipeline Maturity:**
+- **Production-Ready Components:** Stages 0-4, 6-10, Intelligence Tiers 0-1
+- **Testing/Limited Use:** Stage 1 (Decontamination in passthrough mode), Stage 5 (Assembly for SXT elements only)
+- **Cloud-Dependent:** Tier 2 (Evo2 requires API access)
+
+**Known Limitations:**
+- Hostile decontamination currently in testing mode (passthrough enabled)
+- Full denovo assembly not implemented; SPAdes used only for SXT/ICE element validation
+- FMLRC2 tool installed but not actively used in polishing pipeline
+- Tier 2 escalation requires external API credentials and network access
 
 #### ❌ **Caduceus** (Nucleotide Transformer)
 - **Issue:** Missing dependency (`mamba_ssm` package not available in stable environments)
@@ -122,6 +143,63 @@ Results will be in `data/pipeline_output/YOUR_SAMPLE_ID/`.
   - Requires redundant taxonomy building
   - Minimal sensitivity gain for cholera surveillance (specialized lineages)
 - **Decision:** Kraken2 + MMseqs2 "Read Rescue" provides sufficient sensitivity with simpler architecture
+
+---
+
+## 📊 Pipeline Assessment
+
+### Strengths
+- **✅ Adaptive Memory Management**: Sophisticated resource tiering (BALANCED/BUNKER/EMERGENCY) enables deployment in resource-constrained settings
+- **✅ Multi-Reference Strategy**: Dynamic reference selection with Haiti-specific prioritization and global fallback
+- **✅ Read Rescue Innovation**: MMseqs2 protein alignment recovers mutated reads that k-mer classifiers miss
+- **✅ Platform-Aware Processing**: Automatic Nanopore vs Illumina detection with appropriate polishing strategies
+- **✅ Tiered Triage System**: Cost-efficient cascade (Tier 0→1→2) with early decision gates
+- **✅ Transparent Documentation**: Clearly lists tools evaluated but not used, with rationale
+
+### Current Limitations
+- **⚠️ Decontamination Testing Mode**: Hostile currently in passthrough; needs activation for clinical deployment
+- **⚠️ Limited Assembly Scope**: SPAdes only used for SXT elements, not full genome denovo assembly
+- **⚠️ Cloud Dependency**: Tier 2 requires external API; no offline fallback for deep forensics
+- **⚠️ Tool Inventory Accuracy**: Some listed tools (FMLRC2, Freebayes) not actively used in current pipeline
+
+### Recommended for Production Deployment?
+**Partial Yes, with modifications:**
+- Activate Hostile decontamination before clinical use
+- Verify Evo2 API configuration or implement offline Tier 2 fallback
+- Consider adding full denovo assembly fallback for very low coverage samples
+- Validate pipeline with representative clinical samples from target region
+
+---
+
+## ⚙️ Production Deployment Checklist
+
+Before deploying this pipeline for clinical surveillance, ensure:
+
+1. **Enable Hostile Decontamination**: The current release has decontamination in testing/passthrough mode. To activate:
+   - Edit `workflow/Snakefile` line 273
+   - Remove the passthrough logic and enable full decontamination
+   - Verify human DNA removal with test samples
+
+2. **Verify Evo2 API Configuration**: Tier 2 escalation requires cloud API credentials
+   - Configure API keys in `workflow/config/config.yaml`
+   - Note: API calls may incur costs for high-risk variant analysis
+   - Consider fallback strategies if API is unavailable
+
+3. **Database Setup**: Run `scripts/setup_databases.sh` to download:
+   - Kraken2 custom Haiti database (~4GB)
+   - Kraken2 standard database (~8GB)
+   - MMseqs2 protein reference database (~2GB)
+
+4. **Memory Tier Configuration**: The pipeline includes adaptive memory management
+   - Default: BALANCED mode (16GB RAM)
+   - BUNKER mode: <8GB RAM (reduced reference sets)
+   - EMERGENCY mode: <4GB RAM (core features only)
+   - Configure in `workflow/config/config.yaml`
+
+5. **Platform Detection**: Automatic Nanopore vs Illumina detection
+   - Medaka polishing for Nanopore data
+   - Polypolish→Pilon pipeline for Illumina data
+   - Verify correct platform detection with your sequencing setup
 
 ---
 
