@@ -1159,7 +1159,7 @@ rule global_triage:
 rule evo2_analyze:
     input:
         loci_fasta=rules.extract_surveillance_loci.output.loci_fasta,
-        sentinel_loci=config["evo2"]["sentinel_loci"].format(output_dir=config["output_dir"]),
+        sentinel_loci=rules.extract_reference_loci.output.loci_fasta,
         outbreak_loci=config["evo2"]["outbreak_loci"],
         triage_json=rules.local_triage.output.triage_json
     output:
