@@ -81,7 +81,7 @@ Results will be in `data/pipeline_output/YOUR_SAMPLE_ID/`.
 | **2. Classification** | **Kraken2** | Strict k-mer filtering for *Vibrio cholerae* (custom & standard DBs). | ✅ Production |
 | **3. Rescue** | **MMseqs2** | **"Read Rescue"**: Recovers mutated reads via protein alignment. | ✅ Production |
 | **4. Alignment** | **BWA** + **Minimap2** | Maps cleaned reads to reference genome. | ✅ Production |
-| **5. Assembly** | **SPAdes** | Denovo assembly for SXT/ICE elements only (not full genome). | ⚠️ Limited Use* |
+| **5. Assembly** | **SPAdes** | De novo assembly for SXT/ICE elements only (not full genome). | ⚠️ Limited Use* |
 | **6. Consensus** | **Samtools** + **Pilon** | Generates consensus genome with pileup-based calling. | ✅ Production |
 | **7. Polishing** | **Medaka** + **Polypolish** + **Pilon** | Platform-aware polishing: Medaka (Nanopore) or Polypolish→Pilon (Illumina). | ✅ Production |
 | **8. Alignment (Final)** | **MAFFT** | Multiple sequence alignment for phylogenetic and surveillance context. | ✅ Production |
@@ -90,7 +90,7 @@ Results will be in `data/pipeline_output/YOUR_SAMPLE_ID/`.
 
 **Implementation Notes:**
 - *Stage 1: Currently in passthrough mode for performance testing; activate for production deployment.
-- *Stage 5: SPAdes is used selectively for SXT/ICE element assembly validation, not as a full denovo assembly fallback.
+- *Stage 5: SPAdes is used selectively for SXT/ICE element assembly validation, not as a full de novo assembly fallback.
 - *Stage 7: FMLRC2 listed in environment but not actively used; Polypolish→Pilon provides robust Illumina polishing.
 - *Stage 9: Uses BCFtools mpileup/call with surveillance-aware filtering; Freebayes not currently implemented.
 
@@ -126,7 +126,7 @@ Results will be in `data/pipeline_output/YOUR_SAMPLE_ID/`.
 
 **Known Limitations:**
 - Hostile decontamination currently in testing mode (passthrough enabled)
-- Full denovo assembly not implemented; SPAdes used only for SXT/ICE element validation
+- Full de novo assembly not implemented; SPAdes used only for SXT/ICE element validation
 - FMLRC2 tool installed but not actively used in polishing pipeline
 - Tier 2 escalation requires external API credentials and network access
 
@@ -158,7 +158,7 @@ Results will be in `data/pipeline_output/YOUR_SAMPLE_ID/`.
 
 ### Current Limitations
 - **⚠️ Decontamination Testing Mode**: Hostile currently in passthrough; needs activation for clinical deployment
-- **⚠️ Limited Assembly Scope**: SPAdes only used for SXT elements, not full genome denovo assembly
+- **⚠️ Limited Assembly Scope**: SPAdes only used for SXT elements, not full genome de novo assembly
 - **⚠️ Cloud Dependency**: Tier 2 requires external API; no offline fallback for deep forensics
 - **⚠️ Tool Inventory Accuracy**: Some listed tools (FMLRC2, Freebayes) not actively used in current pipeline
 
@@ -166,7 +166,7 @@ Results will be in `data/pipeline_output/YOUR_SAMPLE_ID/`.
 **Partial Yes, with modifications:**
 - Activate Hostile decontamination before clinical use
 - Verify Evo2 API configuration or implement offline Tier 2 fallback
-- Consider adding full denovo assembly fallback for very low coverage samples
+- Consider adding full de novo assembly fallback for very low coverage samples
 - Validate pipeline with representative clinical samples from target region
 
 ---
