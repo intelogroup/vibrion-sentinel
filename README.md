@@ -89,10 +89,10 @@ Results will be in `data/pipeline_output/YOUR_SAMPLE_ID/`.
 | **10. Annotation** | **SnpEff** + **BLAST** | Functional annotation of variants and amr gene detection. | ✅ Production |
 
 **Implementation Notes:**
-- *Stage 1: Currently in passthrough mode for performance testing; activate for production deployment
-- *Stage 5: SPAdes is used selectively for SXT/ICE element assembly validation, not as a full denovo assembly fallback
-- *Stage 7: FMLRC2 listed in environment but not actively used; Polypolish→Pilon provides robust Illumina polishing
-- *Stage 9: Uses BCFtools mpileup/call with surveillance-aware filtering; Freebayes not currently implemented
+- *Stage 1: Currently in passthrough mode for performance testing; activate for production deployment.
+- *Stage 5: SPAdes is used selectively for SXT/ICE element assembly validation, not as a full denovo assembly fallback.
+- *Stage 7: FMLRC2 listed in environment but not actively used; Polypolish→Pilon provides robust Illumina polishing.
+- *Stage 9: Uses BCFtools mpileup/call with surveillance-aware filtering; Freebayes not currently implemented.
 
 ### 2. Intelligence Tiers (The "Brain")
 *From consensus genome to actionable alert.*
