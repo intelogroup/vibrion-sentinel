@@ -676,12 +676,38 @@ rule verify_coverage_integrity:
             --reference {input.reference}
         """
 
+# Rule 4c: Map Reference Loci (Reference Agnostic)
+rule map_reference_loci:
+    input:
+        reference=select_reference,
+        loci="data/references/reference_loci.fasta"
+    output:
+        loci_map="{output_dir}/{{sample}}/05_loci/loci_map.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        outdir=lambda wildcards, output: os.path.dirname(output.loci_map)
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/map_loci.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        mkdir -p {params.outdir}
+        python3 workflow/scripts/map_coords.py \
+            --reference {input.reference} \
+            --loci {input.loci} \
+            --output {output.loci_map} \
+            2>&1 | tee {log}
+        """
+
 # Rule 5: Call variants (SNPs/indels) from alignment
 rule call_variants:
     input:
         bam=rules.align_to_reference.output.bam,
         bai=rules.align_to_reference.output.bai,
-        reference=select_reference
+        reference=select_reference,
+        gene_map=rules.map_reference_loci.output.loci_map
     output:
         vcf="{output_dir}/{{sample}}/05_variants/{{sample}}_variants.vcf.gz".format(
             output_dir=config["output_dir"]
@@ -897,14 +923,34 @@ manifest = {{
     "log": "{log}"
 }}
 
-with open("{output.manifest}", "w") as f:
-    json.dump(manifest, f, indent=2)
+        with open("{output.manifest}", "w") as f:
+            json.dump(manifest, f, indent=2)
+
+        # Label consensus files for downstream tools
+        consensus_guide = {
+            "sample_id": "{params.sample_id}",
+            "consensus_backbone": "{params.sample_id}_consensus.fasta",
+            "usage_guidelines": {
+                "strict_consensus": {
+                    "file": "{params.sample_id}_consensus.fasta",
+                    "description": "Majority-rule strict bases (A,C,G,T).",
+                    "recommended_for": ["Phylogenetic Trees (IQ-TREE, RAxML)", "Core Genome Alignment", "MLST"]
+                },
+                "iupac_consensus": {
+                    "file": "{params.sample_id}_consensus_iupac.fasta",
+                    "description": "Ambiguity codes (R, Y, K, etc.) for mixed sites.",
+                    "recommended_for": ["Serotype Prediction", "Allele Stability Analysis", "Evolutionary Tracking"]
+                }
+            }
+        }
+        with open("{params.outdir}/README_CONSENSUS.json", "w") as f:
+            json.dump(consensus_guide, f, indent=2)
 PY
         """
-
 # Include modular rule files
 include: "rules/polishing.smk"
 include: "rules/validation.smk"
+include: "rules/stress_test.smk"
 
 # Rule 5c: BLAST Novelty Scan (Tier 3 Pre-Filter: Stranger Detection)
 # Identifies novel sequences not present in reference for Evo2 deep analysis
@@ -1169,7 +1215,7 @@ rule evo2_analyze:
     params:
         sample_id=lambda wildcards: wildcards.sample,
         evo2_url=config.get("evo_api_url"),
-        api_key=os.environ.get("NVIDIA_API_KEY", "")
+        api_key=config.get("nvidia_api_key")
     conda:
         "envs/analysis.yaml"
     log:
@@ -1369,6 +1415,52 @@ rule detect_amr_rgi:
             --threads {threads}
         """
 
+# Rule 15: Public Health Typing (Vaccine & Virulence Profile)
+rule public_health_typing:
+    input:
+        vcf=rules.snpeff_annotate.output.annotated_vcf
+    output:
+        report="{output_dir}/{{sample}}/05_variants/public_health_typing.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        sample_id=lambda wildcards: wildcards.sample
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/public_health_typing.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        python3 workflow/scripts/predict_serotype.py \
+            --vcf {input.vcf} \
+            --sample {params.sample_id} \
+            --output {output.report} \
+            2>&1 | tee {log}
+        """
+
+# Rule 16: Targeted Haplotype Resolution (Deep Rescue for Mixed Samples)
+rule resolve_haplotypes:
+    input:
+        bam=rules.align_to_reference.output.bam,
+        bai=rules.align_to_reference.output.bai,
+        snp_report=rules.call_variants.output.snp_report
+    output:
+        haplotypes="{output_dir}/{{sample}}/05_variants/haplotypes.json".format(
+            output_dir=config["output_dir"]
+        )
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/resolve_haplotypes.log".format(output_dir=config["output_dir"])
+    shell:
+        """
+        python3 workflow/scripts/resolve_haplotypes.py \
+            --bam {input.bam} \
+            --snp-report {input.snp_report} \
+            --output {output.haplotypes} \
+            2>&1 | tee {log}
+        """
+
 # Rule 9: Generate comprehensive surveillance report
 rule generate_comprehensive_report:
     input:
@@ -1392,7 +1484,10 @@ rule generate_comprehensive_report:
         platform_report=rules.detect_platform.output.report,
         global_match=rules.global_triage.output.global_match_json,
         broad_report=rules.kraken2_broad_audit.output.kraken_report,
-        polished=rules.polish_consensus.output.polished
+        polished=rules.polish_consensus.output.polished,
+        public_health=rules.public_health_typing.output.report,
+        haplotypes=rules.resolve_haplotypes.output.haplotypes,
+        regional_selection=rules.global_reference_triage.output.match
     output:
         report="{output_dir}/{{sample}}/08_comprehensive_report/surveillance_report.md".format(
             output_dir=config["output_dir"]
