@@ -1,0 +1,31 @@
+{
+  "total_snps": 2,
+  "functional_snps": 0,
+  "total_indels": 3,
+  "snp_details": [
+    {
+      "chrom": "CP003069.1",
+      "pos": 688901,
+      "ref": "C",
+      "alt": "G",
+      "depth": 10,
+      "af": 1.0,
+      "gene_context": null
+    },
+    {
+      "chrom": "CP003070.1",
+      "pos": 767582,
+      "ref": "C",
+      "alt": "A",
+      "depth": 10,
+      "af": 1.0,
+      "gene_context": null
+    }
+  ],
+  "functional_snp_details": [],
+  "heterogeneity_alerts": [],
+  "thresholds_used": {
+    "clonal": 0.9,
+    "minor": 0.1
+  }
+}

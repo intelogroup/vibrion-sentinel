@@ -1,0 +1,21 @@
+{
+  "target": "wbeT",
+  "region": "CP003069.1:2687324-2688226",
+  "metrics": {
+    "global_depth": 6.49,
+    "target_depth": 2.26,
+    "coverage_ratio": 0.35,
+    "coefficient_of_variation": 0.42
+  },
+  "integrity": {
+    "status": "PARTIAL / MOSAIC",
+    "confidence": "MEDIUM",
+    "verdict": "AMBIGUOUS",
+    "target_completeness": true
+  },
+  "library_strategy": {
+    "detected_type": "WGS (Genomic DNA)",
+    "status": "PASS",
+    "warning": null
+  }
+}

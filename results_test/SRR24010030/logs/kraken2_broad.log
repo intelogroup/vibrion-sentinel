@@ -1,0 +1,5 @@
+Running broad Kraken2 audit [Tier: FULL]...
+Loading database information... done.
+189126 sequences (52.27 Mbp) processed in 2.045s (5548.1 Kseq/m, 1533.37 Mbp/m).
+  188846 sequences classified (99.85%)
+  280 sequences unclassified (0.15%)

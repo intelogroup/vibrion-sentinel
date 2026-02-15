@@ -18,7 +18,7 @@ aligner_type: "bwa"
 pipeline_mode: "LABORATORY_FULL"
 
 # AI API
-nvidia_api_key: "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"
+nvidia_api_key: "nvapi-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 evo_api_url: "https://health.api.nvidia.com/v1/biology/arc/evo2-40b/generate"
 
 # Triage

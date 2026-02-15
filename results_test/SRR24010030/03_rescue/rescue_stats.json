@@ -1,0 +1,6 @@
+{
+    "method": "mmseqs2_easy_taxonomy",
+    "db": "swissprot",
+    "rescued_count": 1,
+    "min_seq_id": 0.8
+}

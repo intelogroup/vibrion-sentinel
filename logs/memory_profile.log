@@ -61,3 +61,34 @@
 2026-02-04 20:34:29,508 [INFO] vibrion.memory: MemoryManager initialized
 2026-02-04 20:34:29,508 [INFO] vibrion.memory: Memory tier: FULL (available: 11.2GB)
 2026-02-04 20:34:29,508 [INFO] vibrion.memory: Background memory monitoring started
+2026-02-07 18:27:14,522 [INFO] vibrion.memory: MemoryManager initialized
+2026-02-07 18:27:14,523 [INFO] vibrion.memory: Memory tier: BALANCED (available: 7.6GB)
+2026-02-07 18:27:14,523 [INFO] vibrion.memory: Background memory monitoring started
+2026-02-14 19:34:13,972 [INFO] vibrion.memory: MemoryManager initialized
+2026-02-14 19:34:13,973 [INFO] vibrion.memory: Memory tier: FULL (available: 10.1GB)
+2026-02-14 19:34:13,973 [INFO] vibrion.memory: Background memory monitoring started
+2026-02-14 19:34:33,739 [INFO] vibrion.memory: MemoryManager initialized
+2026-02-14 19:34:33,740 [INFO] vibrion.memory: Memory tier: FULL (available: 10.1GB)
+2026-02-14 19:34:33,740 [INFO] vibrion.memory: Background memory monitoring started
+2026-02-14 19:35:56,917 [INFO] vibrion.memory: MemoryManager initialized
+2026-02-14 19:35:56,917 [INFO] vibrion.memory: Memory tier: BALANCED (available: 9.8GB)
+2026-02-14 19:35:56,917 [INFO] vibrion.memory: Background memory monitoring started
+2026-02-14 19:36:26,921 [INFO] vibrion.memory: Tier change detected: BALANCED → FULL (available: 10.2GB)
+2026-02-14 19:38:41,876 [INFO] vibrion.memory: MemoryManager initialized
+2026-02-14 19:38:41,876 [INFO] vibrion.memory: Memory tier: BALANCED (available: 9.2GB)
+2026-02-14 19:38:41,879 [INFO] vibrion.memory: Background memory monitoring started
+2026-02-14 20:10:15,178 [INFO] vibrion.memory: MemoryManager initialized
+2026-02-14 20:10:15,178 [INFO] vibrion.memory: Memory tier: BALANCED (available: 9.3GB)
+2026-02-14 20:10:15,179 [INFO] vibrion.memory: Background memory monitoring started
+2026-02-14 20:43:07,388 [INFO] vibrion.memory: MemoryManager initialized
+2026-02-14 20:43:07,388 [INFO] vibrion.memory: Memory tier: FULL (available: 11.9GB)
+2026-02-14 20:43:07,389 [INFO] vibrion.memory: Background memory monitoring started
+2026-02-14 20:46:26,616 [INFO] vibrion.memory: MemoryManager initialized
+2026-02-14 20:46:26,616 [INFO] vibrion.memory: Memory tier: FULL (available: 11.0GB)
+2026-02-14 20:46:26,617 [INFO] vibrion.memory: Background memory monitoring started
+2026-02-14 20:46:39,184 [INFO] vibrion.memory: MemoryManager initialized
+2026-02-14 20:46:39,184 [INFO] vibrion.memory: Memory tier: FULL (available: 10.9GB)
+2026-02-14 20:46:39,186 [INFO] vibrion.memory: Background memory monitoring started
+2026-02-14 20:46:47,005 [INFO] vibrion.memory: MemoryManager initialized
+2026-02-14 20:46:47,006 [INFO] vibrion.memory: Memory tier: FULL (available: 10.9GB)
+2026-02-14 20:46:47,006 [INFO] vibrion.memory: Background memory monitoring started

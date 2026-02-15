@@ -1,0 +1,4 @@
+Parameters: kraken=results_test/SRR24010030/02_kraken2/kraken_output.txt, fastq=results_test/SRR24010030/01_hostile/SRR24010030_clean.fastq.gz, target=results_test/SRR24010030/03_rescue/SRR24010030_unclassified.fastq.gz
+Found 168 unclassified reads
+Wrote 168 unclassified reads to results_test/SRR24010030/03_rescue/SRR24010030_unclassified.fastq.gz
+Extraction complete

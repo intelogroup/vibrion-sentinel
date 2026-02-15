@@ -1,0 +1,7 @@
+{
+  "sample": "SRR24010030",
+  "rtxA_status": "G13602A_stop_codon_detected",
+  "virulence_strategy": "Haiti-like_hypervirulent",
+  "module": "VirulenceProfiler",
+  "version": "1.0"
+}

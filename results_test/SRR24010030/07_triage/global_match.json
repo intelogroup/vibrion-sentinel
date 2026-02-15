@@ -1,0 +1,41 @@
+{
+  "global_matches": [
+    {
+      "lineage": "haiti-2010",
+      "similarity": 0.9957350727546412,
+      "containment": 0.0
+    },
+    {
+      "lineage": "yemen-2017",
+      "similarity": 0.9929894842263395,
+      "containment": 0.0
+    },
+    {
+      "lineage": "haiti-2022",
+      "similarity": 0.9922383575363044,
+      "containment": 0.0
+    },
+    {
+      "lineage": "malawi-2023",
+      "similarity": 0.9486472945891784,
+      "containment": 0.0
+    },
+    {
+      "lineage": "india-wave3",
+      "similarity": 0.9364344861178763,
+      "containment": 0.0
+    },
+    {
+      "lineage": "novc-decoy",
+      "similarity": 0.5079055241069685,
+      "containment": 0.0
+    },
+    {
+      "lineage": "v-parahaemolyticus",
+      "similarity": 0.0011077877478675086,
+      "containment": 0.0
+    }
+  ],
+  "status": "SUCCESS",
+  "count": 7
+}

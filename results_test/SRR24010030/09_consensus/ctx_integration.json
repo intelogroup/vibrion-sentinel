@@ -1,0 +1,24 @@
+{
+  "sample_id": "SRR24010030",
+  "ctx_status": "MULTIPLE_SITES_DETECTED",
+  "integration_sites": {
+    "dif1_chr1": {
+      "detected": true,
+      "mean_depth": 5.57,
+      "copy_estimate": 1,
+      "bridging_reads": 100,
+      "spike_detected": false,
+      "region": "CP003069.1:1041000-1047000"
+    },
+    "dif2_chr2": {
+      "detected": true,
+      "mean_depth": 5.3,
+      "copy_estimate": 1,
+      "bridging_reads": 101,
+      "spike_detected": false,
+      "region": "CP003070.1:880000-885000"
+    }
+  },
+  "total_copy_number": 2,
+  "warning": "\u26a0\ufe0f CTX prophage detected at BOTH Chr1 and Chr2 dif sites. Atypical El Tor strain with potential for higher toxin production."
+}

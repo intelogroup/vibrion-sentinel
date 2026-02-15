@@ -1,0 +1,14 @@
+{
+  "sample": "SRR24010030",
+  "statistics": {
+    "reference_length": 4077740,
+    "coverage_percentage": 97.75520263675467,
+    "mean_depth": 6.136684536042023,
+    "heterogeneous_sites_count": 7107,
+    "confident_positions": 3986203
+  },
+  "output_files": {
+    "consensus_fasta": "results_test/SRR24010030/09_consensus/SRR24010030_consensus.fasta",
+    "iupac_fasta": "results_test/SRR24010030/09_consensus/SRR24010030_consensus_iupac.fasta"
+  }
+}

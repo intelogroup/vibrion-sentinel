@@ -1,0 +1,8 @@
+{
+  "sample": "SRR24010030",
+  "gi119_detected": false,
+  "lineage_classification": "Haiti-L2",
+  "accept_for_deployment": true,
+  "module": "LineageSpecificityClassifier",
+  "version": "1.0"
+}

@@ -1,153 +1,130 @@
 # Vibrion Sentinel 🛡️🇭🇹
 
 **Public Health Decision Support System for Cholera Surveillance**
+**Version:** 2.0 (Agentic Sentinel)
 
-This pipeline transforms genomic sequencing data into actionable public health intelligence. Designed for the 2022 Haiti Resurgence, it goes beyond standard variant calling to detect serotype switching (Ogawa/Inaba), hypervirulence markers (rtxA mutations), and mobile genetic elements (SXT/IncA/C plasmids).
+Vibrion Sentinel is an advanced genomic surveillance pipeline designed for the rapid identification and characterization of *Vibrio cholerae* in outbreak settings. Originally developed for the 2022 Haiti Resurgence, it has evolved into a reference-agnostic system capable of handling complex, low-quality, and mixed-infection samples.
 
-## Key Features
+## 🚀 Key Features (v2.0)
 
-*   **Haiti-Specific Virulence Detection:** Identifies rtxA G13602A stop codon (MARTX inactivation, hypervirulence marker unique to Haiti/Yemen strains).
-*   **Serotype Prediction:** Detects wbeT frameshifts causing Ogawa→Inaba switching with vaccine mismatch alerts.
-*   **Mobile Genetic Element Discrimination:** Distinguishes IncA/C plasmids from SXT/R391 ICE elements; predicts transmission dynamics.
-*   **Environmental Resilience Profiling:** Checks hapR (quorum sensing) and vpsA (biofilm) integrity; predicts Rugose vs Smooth phenotypes.
-*   **Lineage Specificity:** Classifies V. cholerae lineages (Haiti-Yemen L2 accepted; Bengal L1 and Philippines GI-119 rejected).
-*   **Sample Quality Assessment:** Estimates freeze-thaw cycles via k-mer CV; calculates SNP divergence dates using Haiti 2010 as molecular clock anchor.
-*   **Forensic Resilience:** Reference-agnostic mapping with dual-consensus strategy (Strict + IUPAC) ensures no data loss.
-*   **Actionable Reporting:** Generates clinical and operational recommendations directly in the report.
+### 1. 🧬 Salvage Mode (New!)
+**AI-Powered Rescue for Low-Quality Data**
+- **Evo2 & MMseqs2 Integration:** Automatically recovers unclassified or short reads rejected by standard classifiers.
+- **Robust Paired-End Handling:** Intelligent pairing logic salvages data even when mate pairs are corrupted or missing.
+- **Zero-Loss Consensus:** Generates alignment-based consensus even when *de novo* assembly fails due to low coverage.
 
-## Installation
+### 2. 🏥 Public Health Typing
+**Clinical Decision Support**
+- **Serotype Prediction:** Detects `wbeT` frameshifts to distinguish Ogawa (wild-type) from Inaba (mutant) serotypes, critical for vaccine deployment.
+- **Toxin Genotyping:** Identifies `ctxB` alleles (e.g., `ctxB7` Haiti/Classical vs `ctxB1` El Tor) to assess virulence potential.
+- **AMR Profiling:** Scans for resistance genes (SXT element, plasmids) to guide antibiotic treatment (Doxycycline/Azithromycin/Ciprofloxacin).
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/intelogroup/vibrion-sentinel.git
-    cd vibrion-sentinel
-    ```
+### 3. 🔍 Heterogeneity Detection
+**Mixed Infection Alert System**
+- **Minor Variant Calling:** Identifies sub-clonal populations (AF 10-90%) indicating mixed infections or rapid in-host evolution.
+- **Strain Triage:** Distinguishes between outbreak strains and environmental non-O1/O139 lineages.
 
-2.  **Install dependencies (Conda):**
-    ```bash
-    conda env create -f environment.yml
-    conda activate vibrion
-    ```
-
-3.  **Verify stress test modules:**
-    ```bash
-    python3 backend/core/logic/virulence_profiler.py
-    python3 backend/core/logic/serotype_mutations.py
-    python3 backend/core/logic/amr_element_discriminator.py
-    python3 backend/core/logic/environmental_resilience.py
-    python3 backend/core/logic/lineage_specificity.py
-    python3 backend/core/logic/degradation_proxy.py
-    ```
-
-4.  **Prepare References:**
-    Ensure `data/references/2010EL-1786.fasta` and other reference files are present, or symlink to main repository:
-    ```bash
-    ln -s /path/to/main/Vibrion/data/kraken2_haiti_custom data/kraken2_haiti_custom
-    ln -s /path/to/main/Vibrion/data/mmseqs_db data/mmseqs_db
-    ```
-
-## Stress Test Validation Framework
-
-This repository includes a **comprehensive stress test framework** for validating Vibrion Sentinel before field deployment. All 7 biological validation modules include embedded unit tests (25/25 passing).
-
-### Run Stress Tests
-
-```bash
-# Run validation harness (generates JSON + Markdown reports)
-python3 validation/validation_harness.py
-
-# View results
-cat validation/STRESS_TEST_RESULTS.md
-```
-
-### Module Documentation
-
-- **`backend/core/logic/virulence_profiler.py`** — Detect rtxA G13602A stop codon (Haiti-specific MARTX inactivation)
-- **`backend/core/logic/serotype_mutations.py`** — Detect wbeT frameshift causing Ogawa→Inaba serotype switch
-- **`backend/core/logic/amr_element_discriminator.py`** — Distinguish IncA/C plasmids from SXT/ICE elements
-- **`backend/core/logic/environmental_resilience.py`** — Check hapR/vpsA integrity for biofilm phenotype prediction
-- **`backend/core/logic/lineage_specificity.py`** — Classify lineages; reject Bengal L1 and Philippines GI-119
-- **`backend/core/logic/degradation_proxy.py`** — Estimate freeze-thaw cycles and SNP divergence dates
-- **`backend/core/logic/stress_test_integrator.py`** — Orchestrate all 7 modules in single execution
-
-### Validation Documentation
-
-- **`validation/STRESS_TEST_PROTOCOL.md`** — Detailed test matrices and expected outcomes for all 7 objectives
-- **`validation/IMPLEMENTATION_GUIDE.md`** — Step-by-step integration instructions for Snakemake pipeline
-- **`validation/README.md`** — Quick reference for validation framework
-- **`VIBRION_PUBLIC_TEST_REPORT.md`** — Comprehensive field deployment test report
-
-## Usage
-
-**Run the pipeline on a sample:**
-
-```bash
-snakemake --configfile workflow/config/config.yaml --cores 4 data/pipeline_output/{SAMPLE_ID}/08_comprehensive_report/surveillance_report.md
-```
-
-**Configuration:**
-Edit `workflow/config/config.yaml` to tune sensitivity thresholds:
-
-```yaml
-variant_thresholds:
-  clonal_af: 0.9       # Consensus threshold
-  minor_af: 0.1        # Heterogeneity detection threshold
-  hetero_min_depth: 20
-
-# Reference databases
-hostile_index: "data/references/hostile"
-kraken_db: "data/kraken2_db/kraken2_vibrion"
-```
-
-## Field Deployment Checklist
-
-- ✅ All 7 stress test modules implemented and tested
-- ✅ 25/25 unit tests passing
-- ✅ Validation harness ready for pipeline integration
-- ✅ Documentation complete (protocol + implementation guide)
-- ⏳ Next: Wire modules into Snakemake rules (see IMPLEMENTATION_GUIDE.md)
-- ⏳ Then: Execute against full test matrix with real field samples
-
-## Testing
-
-**Unit tests (already included in modules):**
-
-```bash
-python3 backend/core/logic/virulence_profiler.py          # 3/3 tests
-python3 backend/core/logic/serotype_mutations.py          # 3/3 tests
-python3 backend/core/logic/amr_element_discriminator.py   # 4/4 tests
-python3 backend/core/logic/environmental_resilience.py    # 4/4 tests
-python3 backend/core/logic/lineage_specificity.py         # 3/3 tests
-python3 backend/core/logic/degradation_proxy.py           # 7/7 tests
-```
-
-**Validation harness test:**
-
-```bash
-python3 validation/validation_harness.py
-```
-
-This generates: `validation/STRESS_TEST_RESULTS.json` and `validation/STRESS_TEST_RESULTS.md`
-
-## License
-
-MIT License
+### 4. 🛡️ Forensic Validation
+- **Housekeeping Checksum:** Validates assembly integrity against 7PET markers (`recA`, `gyrB`, `dnaE`).
+- **Phylogenetic Placement:** Places samples on a global tree to identify origin (e.g., local resurgence vs. foreign import).
 
 ---
 
-## Support & Documentation
+## 📦 Installation
 
-For detailed information on:
-- **Biological validation objectives** → See `validation/STRESS_TEST_PROTOCOL.md`
-- **Snakemake integration** → See `validation/IMPLEMENTATION_GUIDE.md`
-- **Field deployment status** → See `VIBRION_PUBLIC_TEST_REPORT.md`
-- **Execution summary** → See `STRESS_TEST_EXECUTION_SUMMARY.txt`
+### Prerequisites
+- **Conda/Mamba:** Recommended for environment management.
+- **NVIDIA API Key:** Required for Evo2 AI rescue (optional but recommended).
 
-## Repository Information
+### 1. Clone the Repository
+```bash
+git clone https://github.com/intelogroup/vibrion-sentinel.git
+cd vibrion-sentinel
+```
 
-- **Repository:** https://github.com/intelogroup/vibrion-sentinel
-- **Branch:** main (stable, field-ready)
-- **Status:** ✅ Production-ready for field deployment
-- **Last Updated:** February 7, 2026
-- **Test Coverage:** 25/25 unit tests passing
-MIT License
+### 2. Create Environment
+```bash
+conda env create -f environment.yml
+conda activate vibrion
+```
+
+### 3. Configure References
+Ensure reference databases are available. You may need to build or download them:
+- **Kraken2 Database:** Standard or Custom Haiti build.
+- **MMseqs2 Database:** SwissProt or similar.
+- **Reference Genome:** *V. cholerae* 2010EL-1786 (CP003069.1/CP003070.1).
+
+---
+
+## ⚙️ Configuration & Security
+
+**⚠️ SECURITY WARNING: NEVER commit API keys to version control.**
+
+The pipeline requires an NVIDIA API key for the Evo2 rescue feature. Set this as an environment variable before running the pipeline:
+
+```bash
+export NVIDIA_API_KEY="nvapi-..."
+```
+
+Alternatively, you can pass it via configuration file, but ensure that file is **excluded** from git (add to `.gitignore`).
+
+### Config File (`workflow/config/config.yaml`)
+Adjust paths and thresholds in the configuration file:
+
+```yaml
+# Input/Output
+samples_dir: "data/raw_reads"
+output_dir: "data/pipeline_output"
+
+# Thresholds
+mapping_rescue_enabled: True
+mapping_rescue_confidence_threshold: 0.6
+```
+
+---
+
+## 🏃‍♂️ Usage
+
+**Run the pipeline with Snakemake:**
+
+```bash
+# Run locally with 4 cores
+snakemake --use-conda --cores 4
+
+# Run specific sample
+snakemake --cores 4 data/pipeline_output/SRR24010030/08_comprehensive_report/surveillance_report.md
+```
+
+### Output Artifacts
+Results are stored in `data/pipeline_output/{SAMPLE_ID}/`:
+
+- **`08_comprehensive_report/surveillance_report.md`**: The primary actionable report for public health officials.
+- **`09_consensus/`**: Polished consensus genomes (`*_polished.fasta`).
+- **`05_variants/`**: VCF files and SNP reports.
+- **`06_amr/`**: Antibiotic resistance profiles.
+- **`10_phylogeny/`**: Phylogenetic tree placement (`tree.png`).
+
+---
+
+## 🧪 Testing & Validation
+
+This repository includes a stress test framework to validate pipeline integrity.
+
+**Run Validation Harness:**
+```bash
+python3 validation/validation_harness.py
+```
+
+See `validation/STRESS_TEST_PROTOCOL.md` for detailed objectives.
+
+---
+
+## 📜 License
+
+MIT License. See `LICENSE` for details.
+
+---
+
+**Repository:** https://github.com/intelogroup/vibrion-sentinel
+**Status:** ✅ Field-Ready (v2.0)
+**Maintainer:** Intelo Group
