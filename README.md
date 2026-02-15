@@ -1,130 +1,101 @@
-# Vibrion Sentinel 🛡️🇭🇹
+# Vibrion Sentinel
 
 **Public Health Decision Support System for Cholera Surveillance**
-**Version:** 2.0 (Agentic Sentinel)
+**Version:** 2.0
 
-Vibrion Sentinel is an advanced genomic surveillance pipeline designed for the rapid identification and characterization of *Vibrio cholerae* in outbreak settings. Originally developed for the 2022 Haiti Resurgence, it has evolved into a reference-agnostic system capable of handling complex, low-quality, and mixed-infection samples.
+Vibrion Sentinel is an advanced genomic surveillance pipeline designed for the identification, characterization, and molecular epidemiology of *Vibrio cholerae*. Originally developed to support response efforts during the 2022 Haiti Resurgence, Version 2.0 introduces reference-agnostic capabilities and "Salvage Mode" to maximize data recovery from complex or low-quality field samples.
 
-## 🚀 Key Features (v2.0)
+## Key Features (Version 2.0)
 
-### 1. 🧬 Salvage Mode (New!)
-**AI-Powered Rescue for Low-Quality Data**
-- **Evo2 & MMseqs2 Integration:** Automatically recovers unclassified or short reads rejected by standard classifiers.
-- **Robust Paired-End Handling:** Intelligent pairing logic salvages data even when mate pairs are corrupted or missing.
-- **Zero-Loss Consensus:** Generates alignment-based consensus even when *de novo* assembly fails due to low coverage.
+### 1. Salvage Mode for Low-Quality Data
+Standard pipelines often discard short reads (<50bp) or unclassified sequences. Vibrion Sentinel integrates **Evo2** and **MMseqs2** to rescue these reads, enabling successful consensus generation from degraded samples or those with high host contamination. It includes robust logic for paired-end file handling and broken mate-pair recovery.
 
-### 2. 🏥 Public Health Typing
-**Clinical Decision Support**
-- **Serotype Prediction:** Detects `wbeT` frameshifts to distinguish Ogawa (wild-type) from Inaba (mutant) serotypes, critical for vaccine deployment.
-- **Toxin Genotyping:** Identifies `ctxB` alleles (e.g., `ctxB7` Haiti/Classical vs `ctxB1` El Tor) to assess virulence potential.
-- **AMR Profiling:** Scans for resistance genes (SXT element, plasmids) to guide antibiotic treatment (Doxycycline/Azithromycin/Ciprofloxacin).
+### 2. Public Health Typing
+The pipeline automatically extracts and interprets critical markers for public health decision-making:
+*   **Serotype Prediction:** Analyzes *wbeT* frameshifts to distinguish Ogawa (wild-type) from Inaba (mutant) serotypes.
+*   **Toxin Genotyping:** Identifies *ctxB* alleles (e.g., ctxB7 vs. ctxB1) to assess virulence potential.
+*   **Antimicrobial Resistance (AMR):** Scans for resistance determinants in the SXT element and plasmids to guide antibiotic stewardship (e.g., Doxycycline susceptibility).
 
-### 3. 🔍 Heterogeneity Detection
-**Mixed Infection Alert System**
-- **Minor Variant Calling:** Identifies sub-clonal populations (AF 10-90%) indicating mixed infections or rapid in-host evolution.
-- **Strain Triage:** Distinguishes between outbreak strains and environmental non-O1/O139 lineages.
+### 3. Heterogeneity Detection
+To support complex outbreak analysis, the pipeline identifies sub-clonal populations (minor variants with allele frequency 10-90%). This functionality is critical for detecting:
+*   Mixed infections (co-infection with multiple strains).
+*   Rapid in-host evolution (e.g., active serotype switching).
+*   Sample contamination.
 
-### 4. 🛡️ Forensic Validation
-- **Housekeeping Checksum:** Validates assembly integrity against 7PET markers (`recA`, `gyrB`, `dnaE`).
-- **Phylogenetic Placement:** Places samples on a global tree to identify origin (e.g., local resurgence vs. foreign import).
+### 4. Forensic Validation
+Ensures data integrity through:
+*   **Housekeeping Checksum:** Validates assembly integrity against 7PET markers (*recA*, *gyrB*, *dnaE*).
+*   **Phylogenetic Placement:** Automatically places samples on a global phylogenetic tree to distinguish local resurgence from foreign importation.
 
----
-
-## 📦 Installation
+## Installation
 
 ### Prerequisites
-- **Conda/Mamba:** Recommended for environment management.
-- **NVIDIA API Key:** Required for Evo2 AI rescue (optional but recommended).
+*   **Operating System:** Linux or macOS
+*   **Package Manager:** Conda or Mamba
+*   **Hardware:** Minimum 16GB RAM recommended (8GB minimum).
 
-### 1. Clone the Repository
-```bash
-git clone https://github.com/intelogroup/vibrion-sentinel.git
-cd vibrion-sentinel
-```
+### Steps
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/intelogroup/vibrion-sentinel.git
+    cd vibrion-sentinel
+    ```
 
-### 2. Create Environment
-```bash
-conda env create -f environment.yml
-conda activate vibrion
-```
+2.  **Create the environment:**
+    ```bash
+    conda env create -f environment.yml
+    conda activate vibrion
+    ```
 
-### 3. Configure References
-Ensure reference databases are available. You may need to build or download them:
-- **Kraken2 Database:** Standard or Custom Haiti build.
-- **MMseqs2 Database:** SwissProt or similar.
-- **Reference Genome:** *V. cholerae* 2010EL-1786 (CP003069.1/CP003070.1).
+3.  **Prepare References:**
+    Ensure reference databases (Kraken2, MMseqs2) and genome assemblies (2010EL-1786) are available in the `data/` directory.
 
----
+## Configuration
 
-## ⚙️ Configuration & Security
-
-**⚠️ SECURITY WARNING: NEVER commit API keys to version control.**
-
-The pipeline requires an NVIDIA API key for the Evo2 rescue feature. Set this as an environment variable before running the pipeline:
+### Environment Variables
+For the Evo2 AI rescue feature to function, you must provide an NVIDIA API key. For security, **do not commit this key**. Set it as an environment variable before running the pipeline:
 
 ```bash
 export NVIDIA_API_KEY="nvapi-..."
 ```
 
-Alternatively, you can pass it via configuration file, but ensure that file is **excluded** from git (add to `.gitignore`).
-
-### Config File (`workflow/config/config.yaml`)
-Adjust paths and thresholds in the configuration file:
+### Pipeline Settings
+Edit `workflow/config/config.yaml` to adjust run parameters:
 
 ```yaml
-# Input/Output
+# Directory Paths
 samples_dir: "data/raw_reads"
 output_dir: "data/pipeline_output"
 
-# Thresholds
+# Analysis Thresholds
 mapping_rescue_enabled: True
 mapping_rescue_confidence_threshold: 0.6
 ```
 
----
+## Usage
 
-## 🏃‍♂️ Usage
+The pipeline is built on Snakemake.
 
-**Run the pipeline with Snakemake:**
-
+**Standard Run (4 cores):**
 ```bash
-# Run locally with 4 cores
 snakemake --use-conda --cores 4
+```
 
-# Run specific sample
+**Run for a specific sample:**
+```bash
 snakemake --cores 4 data/pipeline_output/SRR24010030/08_comprehensive_report/surveillance_report.md
 ```
 
-### Output Artifacts
-Results are stored in `data/pipeline_output/{SAMPLE_ID}/`:
+## Outputs
 
-- **`08_comprehensive_report/surveillance_report.md`**: The primary actionable report for public health officials.
-- **`09_consensus/`**: Polished consensus genomes (`*_polished.fasta`).
-- **`05_variants/`**: VCF files and SNP reports.
-- **`06_amr/`**: Antibiotic resistance profiles.
-- **`10_phylogeny/`**: Phylogenetic tree placement (`tree.png`).
+Results are organized by sample ID in `data/pipeline_output/{SAMPLE_ID}/`:
 
----
+*   **`08_comprehensive_report/`**: Contains `surveillance_report.md`, the primary actionable report.
+*   **`09_consensus/`**: The polished consensus genome (*.fasta) and assembly metrics.
+*   **`05_variants/`**: VCF files and SNP reports detailing variants found against the reference.
+*   **`06_amr/`**: Antibiotic resistance profiles and virulence factors.
+*   **`10_phylogeny/`**: Phylogenetic tree image showing the sample's placement in the global context.
 
-## 🧪 Testing & Validation
+## License
 
-This repository includes a stress test framework to validate pipeline integrity.
-
-**Run Validation Harness:**
-```bash
-python3 validation/validation_harness.py
-```
-
-See `validation/STRESS_TEST_PROTOCOL.md` for detailed objectives.
-
----
-
-## 📜 License
-
-MIT License. See `LICENSE` for details.
-
----
-
-**Repository:** https://github.com/intelogroup/vibrion-sentinel
-**Status:** ✅ Field-Ready (v2.0)
-**Maintainer:** Intelo Group
+MIT License. See `LICENSE` file for details.
