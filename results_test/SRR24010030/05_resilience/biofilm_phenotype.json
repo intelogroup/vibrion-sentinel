@@ -1,8 +1,0 @@
-{
-  "sample": "SRR24010030",
-  "hapR_integrity": "intact",
-  "vpsA_integrity": "intact",
-  "biofilm_phenotype": "Rugose",
-  "module": "EnvironmentalResilienceProfiler",
-  "version": "1.0"
-}

@@ -1,6 +1,0 @@
-Coverage Check: 6.49x (threshold: 10.0x)
-⚠️  Coverage too low for polishing (<10.0x)
-ℹ️  Thermal Safety: Skipping expensive polishing on low-coverage data
-ℹ️  Forensic Safety: Preventing artifactual 'polished' genome from insufficient data
-STATUS: LOW_COV_SKIP
-✅ Draft consensus copied as final (no polishing applied)
