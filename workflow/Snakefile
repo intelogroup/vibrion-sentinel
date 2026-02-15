@@ -855,7 +855,7 @@ rule verify_coverage_integrity:
 rule map_reference_loci:
     input:
         reference=select_reference,
-        loci="data/references/reference_loci.fasta"
+        loci=config["reference_dir"] + "/reference_loci.fasta"
     output:
         loci_map="{output_dir}/{{sample}}/05_loci/loci_map.json".format(
             output_dir=config["output_dir"]
@@ -1182,7 +1182,8 @@ rule forensic_confirmation:
 rule extract_surveillance_loci:
     input:
         reference=rules.polish_consensus.output.polished,
-        bed="data/references/surveillance_loci.bed"
+        bed=config["reference_dir"] + "/surveillance_loci.bed",
+        ref_loci=config["reference_dir"] + "/reference_loci.fasta"
     output:
         loci_fasta="{output_dir}/{{sample}}/05_loci/surveillance_loci.fasta".format(
             output_dir=config["output_dir"]
@@ -1200,7 +1201,7 @@ rule extract_surveillance_loci:
 rule extract_reference_loci:
     input:
         reference=select_reference,
-        bed="data/references/surveillance_loci.bed"
+        bed=config["reference_dir"] + "/surveillance_loci.bed"
     output:
         loci_fasta="{output_dir}/{{sample}}/05_loci/reference_loci.fasta".format(
             output_dir=config["output_dir"]

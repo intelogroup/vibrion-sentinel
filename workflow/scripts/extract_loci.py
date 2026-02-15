@@ -10,12 +10,11 @@ import subprocess
 from pathlib import Path
 from Bio import SeqIO
 
-def find_locus_via_blast(query_name, target_fasta):
+def find_locus_via_blast(query_name, target_fasta, ref_loci_path):
     """
     Fallback: If faidx fails (e.g. ID mismatch), search for the locus using BLAST.
-    Uses data/references/reference_loci.fasta as the sequence source.
+    Uses ref_loci_path as the sequence source.
     """
-    ref_loci_path = "data/references/reference_loci.fasta"
     if not os.path.exists(ref_loci_path):
         return None
 
@@ -85,6 +84,12 @@ def main():
     # Parse Snakemake inputs
     reference_path = Path(snakemake.input.reference) # noqa: F821
     bed_path = Path(snakemake.input.bed) # noqa: F821
+    # Check if ref_loci input exists, default to hardcoded if not (for backward compatibility)
+    if hasattr(snakemake.input, 'ref_loci'):
+        ref_loci_path = Path(snakemake.input.ref_loci)
+    else:
+        ref_loci_path = Path("data/references/reference_loci.fasta")
+
     output_fasta = Path(snakemake.output.loci_fasta) # noqa: F821
     log_file = Path(snakemake.log[0]) # noqa: F821
     
@@ -99,7 +104,8 @@ def main():
     
     with open(log_file, 'w') as log:
         log.write(f"Extracting loci from reference: {reference_path}\n")
-        log.write(f"BED file: {bed_path}\n\n")
+        log.write(f"BED file: {bed_path}\n")
+        log.write(f"Fallback reference loci: {ref_loci_path}\n\n")
         
         loci_extracted = 0
         
@@ -125,7 +131,7 @@ def main():
                     # DISCOVERY FALLBACK: If coordinate extraction failed, try BLAST search
                     if not sequence:
                         log.write(f"  ⚠️  Coordinates {chrom}:{start}-{end} failed. Attempting BLAST discovery...\n")
-                        sequence = find_locus_via_blast(name, reference_path)
+                        sequence = find_locus_via_blast(name, reference_path, ref_loci_path)
                     
                     if sequence:
                         # Write FASTA entry
