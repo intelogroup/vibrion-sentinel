@@ -33,7 +33,7 @@ rule detect_ctx_integration:
     input:
         bam=rules.align_to_reference.output.bam,
         bai=rules.align_to_reference.output.bai,
-        reference="data/references/2010EL-1786.fasta"
+        reference=select_reference
     output:
         report="{output_dir}/{{sample}}/09_consensus/ctx_integration.json".format(
             output_dir=config["output_dir"]
@@ -61,7 +61,7 @@ rule assemble_sxt:
     input:
         bam=rules.align_to_reference.output.bam,
         bai=rules.align_to_reference.output.bai,
-        reference="data/references/2010EL-1786.fasta"
+        reference=select_reference
     output:
         report="{output_dir}/{{sample}}/09_consensus/sxt_assembly.json".format(
             output_dir=config["output_dir"]

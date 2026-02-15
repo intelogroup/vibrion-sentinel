@@ -19,6 +19,30 @@ def load_json(path):
                 return {}
     return {}
 
+def format_regional_context(regional_data: Dict[str, Any]) -> str:
+    """Format the Regional Reference Selection context"""
+    if not regional_data:
+        return ""
+        
+    section = "\n## 1a. Regional Lineage Context\n"
+    best = regional_data.get("best_match", "Unknown")
+    
+    section += f"**Selected Reference Baseline:** `{best}`\n"
+    section += "> The pipeline automatically selected the closest regional ancestor for high-precision variant calling.\n\n"
+    
+    section += "| Regional Baseline | Genomic Similarity (k-mer) | Status |\n"
+    section += "|---|---|---|\n"
+    
+    sims = regional_data.get("all_similarities", {})
+    # Sort by similarity descending
+    sorted_sims = sorted(sims.items(), key=lambda x: x[1], reverse=True)
+    
+    for name, score in sorted_sims:
+        status = "✅ Selected" if name == best else "⚪ Comparator"
+        section += f"| {name} | `{score:.4f}` | {status} |\n"
+        
+    return section
+
 def format_evo2_section(evo2_data: Dict[str, Any]) -> str:
     """Format Evo2 anomaly detection section"""
     
@@ -221,6 +245,78 @@ def format_phage_section(phage_data: Dict[str, Any]) -> str:
     else:
         section += "No significant vibriophage or satellite markers detected.\n"
         
+    return section
+
+def format_immune_evasion_section(amr_data: Dict[str, Any]) -> str:
+    """Format Immune Evasion & MAIT Activation section (NEW)"""
+    if not amr_data:
+        return ""
+    
+    threat = amr_data.get("threat_assessment", {})
+    immune_evasion = threat.get("immune_evasion_markers", {})
+    mait_activation = threat.get("mait_activation_markers", {})
+    
+    if not immune_evasion and not mait_activation:
+        return ""
+    
+    section = "\n## 1f. Immune Evasion & Metabolic Pathways\n"
+    
+    # NanH Sialidase Detection
+    if 'nanH' in immune_evasion:
+        section += "### Sialidase (NanH) Detection\n"
+        nanH_info = immune_evasion['nanH']
+        evidence = nanH_info.get('evidence', {})
+        section += f"- **Status:** ✅ PRESENT ({evidence.get('total_kmer_hits', 0)} k-mer hits)\n"
+        section += f"- **Evidence:** {evidence.get('unique_kmers_matched', 0)} unique kmers matched (Confidence: {evidence.get('confidence', 'UNKNOWN')})\n"
+        section += "- **Functional Prediction:** ACTIVE (sialic acid desialylation)\n"
+        section += "- **Immune Impact:** Neuraminidase-mediated evasion of antibody and complement-mediated immunity\n\n"
+    else:
+        section += "### Sialidase (NanH) Detection\n"
+        section += "- **Status:** ❌ NOT DETECTED\n\n"
+    
+    # MAIT Cell Activation (Riboflavin Biosynthesis)
+    has_ribB = 'ribB' in mait_activation
+    has_ribD = 'ribD' in mait_activation
+    
+    section += "### MAIT Cell Activation (Riboflavin Biosynthesis)\n"
+    
+    if has_ribB:
+        ribB_info = mait_activation['ribB']
+        evidence = ribB_info.get('evidence', {})
+        section += f"- **ribB Status:** ✅ PRESENT ({evidence.get('total_kmer_hits', 0)} k-mer hits)\n"
+    else:
+        section += "- **ribB Status:** ❌ NOT FOUND\n"
+    
+    if has_ribD:
+        ribD_info = mait_activation['ribD']
+        evidence = ribD_info.get('evidence', {})
+        section += f"- **ribD Status:** ✅ PRESENT ({evidence.get('total_kmer_hits', 0)} k-mer hits)\n"
+    else:
+        section += "- **ribD Status:** ❌ NOT FOUND\n"
+    
+    if has_ribB and has_ribD:
+        section += "- **Pathway Completeness:** ✅ INTACT (riboflavin biosynthesis functional)\n"
+        section += "- **MAIT Activation Potential:** HIGH (produces natural MAIT cell agonist)\n"
+    else:
+        section += "- **Pathway Completeness:** ❌ INCOMPLETE\n"
+        section += "- **MAIT Activation Potential:** REDUCED/ABSENT\n"
+    
+    section += "\n"
+    
+    # Combined Assessment
+    section += "### Combined Immune Targeting Assessment\n"
+    if 'nanH' in immune_evasion and has_ribB and has_ribD:
+        section += "> [!WARNING]\n"
+        section += "> **Enhanced Immune Evasion Detected:** This strain combines:\n"
+        section += "> 1. **Sialidase-mediated evasion** (NanH) - blocks antibody/complement killing\n"
+        section += "> 2. **MAIT activation** (riboflavin pathway) - stimulates adaptive immunity\n"
+        section += "> \n"
+        section += "> **Interpretation:** This dual strategy creates a unique immune environment where the pathogen evades innate (antibody-mediated) killing while stimulating adaptive (MAIT-driven) immunity. This represents an **enhanced threat profile**.\n\n"
+    elif 'nanH' in immune_evasion:
+        section += "- **Sialidase Only:** Evasion of antibody-mediated immunity (innate defense compromise).\n\n"
+    elif has_ribB and has_ribD:
+        section += "- **MAIT Activation Only:** Strong adaptive immune stimulation without accompanying evasion mechanisms.\n\n"
+    
     return section
 
 def format_advanced_forensic_section(serogroup_info: Dict[str, Any]) -> str:
@@ -506,38 +602,34 @@ def generate_markdown_report(data: Dict, output_path: str):
              header_subtitle = "Low Biomass (<1000 reads)"
              qc_reason = "Insufficient DNA for consensus. Consider re-extracting from larger volume."
 
-    # Check for Foreign Import (SNP Distance Logic)
+    # Heterogeneity Check (Population Structure)
     snp_data = data.get("snp_report", {})
-    if snp_data and "snp_distance" in snp_data:
-        dist = snp_data.get("snp_distance", 0)
-        status = snp_data.get("status", "UNKNOWN")
+    heterogeneity_alerts = snp_data.get("heterogeneity_alerts", [])
+    
+    if heterogeneity_alerts and qc_passed:
+        # Escalate status if not already RED
+        if header_color != "🔴 RED":
+            header_color = "🟡 YELLOW"
+            header_title = "PATHOGEN CONFIRMED (MIXED)"
+            header_subtitle = f"Genomic Heterogeneity Detected ({len(heterogeneity_alerts)} loci)"
+
+    # Check for Foreign Import (SNP Distance Logic)
+    if snp_data and "snp_distance_analysis" in snp_data:
+        # New structure support
+        dist_info = snp_data.get("snp_distance_analysis", {})
+        dist = dist_info.get("snp_distance_to_reference", 0)
         
-        if dist > 100 or status == "FOREIGN_IMPORT":
+        if dist > 100:
              header_color = "🔴 RED"
              header_title = "FOREIGN LINEAGE DETECTED"
-             header_subtitle = f"Genomic Mismatch: {dist} SNPs from Haiti Baseline"
-             qc_reason = f"Sample is V. cholerae but distinct from the Haiti outbreak clone ({dist} SNPs). Quarantine advised."
+             header_subtitle = f"Genomic Mismatch: {dist} SNPs from Reference"
+             qc_reason = f"Sample is V. cholerae but distinct from the local baseline ({dist} SNPs). Potential Import."
              qc_passed = True 
              
     elif is_discovery:
-        # Check for High Risk / New Resistance
-        evo = data.get("evo2_analysis", {})
-        best = evo.get("best_archetype_match", "Unknown")
-        
-        if is_non_cholera:
-            # Green header for NON-EPIDEMIC
-            header_color = "🟢 GREEN"
-            header_title = "NON-EPIDEMIC ENVIRONMENTAL"
-            header_subtitle = f"Safe: {serogroup_name} - NOT Cholera Outbreak Strain"
-            qc_reason = f"This sample is classified as {serogroup_name}. It is a non-virulent environmental Vibrio and NOT a threat to public health. No action required."
-        else:
-            header_color = "🟡 YELLOW"
-            header_title = "PATHOGEN CONFIRMED (ANOMALY)"
-            header_subtitle = f"New Mutations or Minor Serotype Detected ({serogroup_name})"
-        
-        if triage.get("alert_level") == "CRITICAL" or "VIRULENT" in str(data.get("serogroup_info", {})):
-             header_color = "🟡 YELLOW" 
-             pass
+        header_color = "🔵 BLUE"
+        header_title = "DISCOVERY MODE"
+        header_subtitle = "Reference-Free Assembly Active"
 
     # Render Header
     report.append(f"""
@@ -555,7 +647,6 @@ def generate_markdown_report(data: Dict, output_path: str):
 """)
 
     # Render Alerts / QC Blocks
-    # Render Alerts / QC Blocks
     if qc_reason:
         alert_type = "🛑 NO-GO" if not qc_passed else "⚠️  RESCUE ALERT"
         report.append(f"""
@@ -568,6 +659,42 @@ def generate_markdown_report(data: Dict, output_path: str):
         if not qc_passed:
             report.append("\n### 🛑 Analysis Halted")
             report.append("Detailed forensic analysis (Evo2, Phylogeny, AMR) requires valid sequencing coverage (>10x).")
+    
+    # Render Heterogeneity Alert
+    if heterogeneity_alerts:
+        report.append(f"""
+> [!WARNING]
+> ### 🧬 HETEROGENEITY ALERT: Mixed Bacterial Population
+> **Status:** Minor variants (10-90%) detected in key surveillance loci.
+> **Significance:** This may indicate a mixed infection, ongoing evolution (e.g., serotype switching), or contamination.
+>
+> | Locus | Allele Freq | Depth | Description |
+> |---|---|---|---|
+""")
+        for alert in heterogeneity_alerts:
+            report.append(f"> | **{alert.get('gene')}** | `{alert.get('af'):.2f}` | {alert.get('depth')}x | {alert.get('description')} |")
+        report.append("\n")
+
+    # Operational Guidance Section (Decision Support)
+    recommendations = []
+    if heterogeneity_alerts:
+        # Check if wbeT is mixed
+        mixed_genes = [a['gene'] for a in heterogeneity_alerts]
+        if 'wbeT' in mixed_genes or 'rfb' in mixed_genes:
+            recommendations.append("- **[LAB] Serotype Transition Alert:** Heterogeneity in *wbeT* detected. Recommend **colony picking** (min 10 colonies) to verify if both Ogawa and Inaba are co-circulating.")
+        else:
+            recommendations.append("- **[LAB] Population Heterogeneity:** Mixed alleles detected. Recommend verifying sample purity and considering re-extraction if contamination is suspected.")
+    
+    # Public Health Specific Logic
+    ph_data = data.get("public_health", {})
+    if "ctxB7" in str(ph_data):
+        recommendations.append("- **[CLINICAL] High Virulence Warning:** Genotype **ctxB7** (Haiti/Classical) confirmed. Alert clinicians to prepare for higher secretory volumes and rapid clinical progression.")
+
+    if recommendations:
+        report.append("\n## 3. Operational & Clinical Guidance")
+        for rec in recommendations:
+            report.append(rec)
+        report.append("\n")
         
         # Phage Trap Logic (Challenge 1)
         phage_report = data.get("phage_report", {})
@@ -586,13 +713,20 @@ def generate_markdown_report(data: Dict, output_path: str):
     if qc_passed:
         report.append("\n## 1. Genomic Identity")
         serogroup = data.get("serogroup_info") or {}
-        primary = serogroup.get("primary_serogroup", "Unknown")
+        primary = serogroup.get("primary_serogroup") or serogroup.get("serogroup", "Unknown")
         lineage = serogroup.get("lineage_context", "Unknown")
-        serotype = (serogroup.get("serotype_details") or {}).get("serotype_status", "Unknown")
+        
+        # Handle different serotype structures
+        serotype_details = serogroup.get("serotype_details") or {}
+        serotype = serotype_details.get("serotype_status") or serogroup.get("serotype", "Unknown")
         
         report.append(f"- **Serogroup:** {primary}")
         report.append(f"- **Serotype:** {serotype}")
         report.append(f"- **Lineage:** {lineage}")
+
+        # Regional Context
+        regional_context = format_regional_context(data.get("regional_selection", {}))
+        report.append(regional_context)
 
         if "metabolic_grounding" in serogroup:
              meta = serogroup["metabolic_grounding"]
@@ -643,6 +777,11 @@ def generate_markdown_report(data: Dict, output_path: str):
         phage_section = format_phage_section(data.get("phage_report", {}))
         if phage_section:
             report.append(phage_section)
+        
+        # Immune Evasion & MAIT Activation Section (NEW)
+        immune_section = format_immune_evasion_section(data.get("amr_report", {}))
+        if immune_section:
+            report.append(immune_section)
 
         global_match_section = format_global_match_section(data.get("global_match"))
         if global_match_section:
@@ -773,6 +912,7 @@ def main(snakemake):
         "sxt_report": safe_get_input("sxt_report"),
         "platform_report": safe_get_input("platform_report"),
         "global_match": safe_get_input("global_match"),
+        "regional_selection": safe_get_input("regional_selection"),
         "broad_report": getattr(snakemake.input, "broad_report", None)
     }
     

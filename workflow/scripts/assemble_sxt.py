@@ -150,6 +150,52 @@ def extract_sxt_reads(bam_file: Path, output_fastq: Path, sxt_region: dict) -> i
         return 0
 
 
+def extract_consensus_fallback(bam_file: Path, sxt_region: dict, output_fasta: Path) -> bool:
+    """
+    Generate a consensus sequence from the BAM alignment for the SXT region.
+    This serves as a fallback when assembly fails or is skipped.
+    """
+    if sxt_region is None:
+        return False
+
+    print(f"   Generating alignment-based consensus for {sxt_region['chrom']}:{sxt_region['start']}-{sxt_region['end']}...")
+    
+    try:
+        samfile = pysam.AlignmentFile(str(bam_file), "rb")
+        
+        consensus = []
+        # Iterate through the region
+        # Use min_base_quality=20 to filter out noisy reads
+        for pileupcolumn in samfile.pileup(sxt_region['chrom'], sxt_region['start'], sxt_region['end'], truncate=True, min_base_quality=20):
+            # Get the most common base
+            counts = {'A': 0, 'C': 0, 'G': 0, 'T': 0, 'N': 0}
+            for pileupread in pileupcolumn.pileups:
+                if not pileupread.is_del and not pileupread.is_refskip:
+                    base = pileupread.alignment.query_sequence[pileupread.query_position].upper()
+                    counts[base] = counts.get(base, 0) + 1
+            
+            # Simple majority rule
+            best_base = max(counts, key=counts.get)
+            if counts[best_base] == 0:
+                consensus.append('N')
+            else:
+                consensus.append(best_base)
+        
+        samfile.close()
+        
+        if not consensus:
+            return False
+            
+        with open(output_fasta, "w") as f:
+            f.write(f">SXT_Alignment_Consensus_{sxt_region['chrom']}_{sxt_region['start']}_{sxt_region['end']}\n")
+            f.write("".join(consensus) + "\n")
+            
+        return True
+    except Exception as e:
+        print(f"   ❌ Fallback consensus failed: {e}", file=sys.stderr)
+        return False
+
+
 def run_spades(reads_fastq: Path, output_dir: Path, threads: int = 4) -> Path:
     """
     Run SPAdes assembler on SXT reads.
@@ -255,20 +301,24 @@ def main():
     if args.mode == "FIELD_RAPID":
         print("   ⚡ FIELD_RAPID mode: Skipping SPAdes assembly")
         
+        # Fallback to alignment consensus
+        success = extract_consensus_fallback(Path(args.bam), sxt_region, Path(args.contigs))
+        
         report = {
             "sample_id": args.sample or Path(args.bam).stem,
             "status": "SKIPPED",
+            "method": "alignment_consensus" if success else "none",
             "reason": "FIELD_RAPID mode - using reference-based consensus",
             "assembly": None
         }
         
-        # Create empty contigs file
-        Path(args.contigs).touch()
+        if not success:
+            Path(args.contigs).touch()
         
         with open(args.output, 'w') as f:
             json.dump(report, f, indent=2)
         
-        print("   ✅ Skipped (reference-based consensus will be used)")
+        print(f"   ✅ Skipped ({'alignment-based consensus generated' if success else 'failed to generate consensus'})")
         return
     
     # Check RAM
@@ -276,14 +326,18 @@ def main():
         print("   ⚠️  Insufficient RAM for SPAdes (need 8GB)")
         print("   Falling back to reference-based consensus")
         
+        success = extract_consensus_fallback(Path(args.bam), sxt_region, Path(args.contigs))
+        
         report = {
             "sample_id": args.sample or Path(args.bam).stem,
             "status": "SKIPPED",
+            "method": "alignment_consensus" if success else "none",
             "reason": "Insufficient RAM for SPAdes assembly",
             "assembly": None
         }
         
-        Path(args.contigs).touch()
+        if not success:
+            Path(args.contigs).touch()
         
         with open(args.output, 'w') as f:
             json.dump(report, f, indent=2)
@@ -297,14 +351,18 @@ def main():
     if read_count < 100:
         print(f"   ⚠️  Too few reads ({read_count}) for assembly")
         
+        success = extract_consensus_fallback(Path(args.bam), sxt_region, Path(args.contigs))
+        
         report = {
             "sample_id": args.sample or Path(args.bam).stem,
             "status": "INSUFFICIENT_COVERAGE",
+            "method": "alignment_consensus" if success else "none",
             "reason": f"Only {read_count} reads mapped to SXT region",
             "assembly": None
         }
         
-        Path(args.contigs).touch()
+        if not success:
+            Path(args.contigs).touch()
         
         with open(args.output, 'w') as f:
             json.dump(report, f, indent=2)
@@ -325,6 +383,7 @@ def main():
         report = {
             "sample_id": args.sample or Path(args.bam).stem,
             "status": "SUCCESS",
+            "method": "assembly",
             "reads_extracted": read_count,
             "assembly": analysis
         }
@@ -335,14 +394,19 @@ def main():
     except Exception as e:
         print(f"   ❌ Assembly failed: {e}", file=sys.stderr)
         
+        # Try fallback one last time
+        success = extract_consensus_fallback(Path(args.bam), sxt_region, Path(args.contigs))
+        
         report = {
             "sample_id": args.sample or Path(args.bam).stem,
             "status": "FAILED",
+            "method": "alignment_consensus" if success else "none",
             "reason": str(e),
             "assembly": None
         }
         
-        Path(args.contigs).touch()
+        if not success:
+            Path(args.contigs).touch()
     
     # Write report
     with open(args.output, 'w') as f:

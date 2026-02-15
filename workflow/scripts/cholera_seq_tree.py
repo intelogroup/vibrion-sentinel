@@ -66,34 +66,6 @@ def main():
         print("Error: IQ-TREE not found in PATH. Install iqtree/iqtree2 in the analysis environment.")
         sys.exit(1)
 
-    def create_stub_outputs(message):
-        """Generates placeholder files to prevent pipeline crash."""
-        print(f"⚠️  {message}")
-        print("Generating stub tree files to allow pipeline continuation...")
-        
-        final_tree_path = outdir / "tree.nwk"
-        with open(final_tree_path, 'w') as f:
-            f.write("();\n")
-        
-        try:
-            import matplotlib
-            matplotlib.use('Agg')
-            import matplotlib.pyplot as plt
-            
-            fig = plt.figure(figsize=(8, 6))
-            plt.text(0.5, 0.5, f"Phylogeny Unavailable\n{message}", 
-                    ha='center', va='center', fontsize=12)
-            plt.axis('off')
-            plt.savefig(outdir / "tree.png", dpi=150, bbox_inches='tight')
-            plt.close(fig)
-        except Exception as e:
-            print(f"Warning: Could not create stub PNG: {e}")
-            # Ensure file exists even if plotting fails
-            (outdir / "tree.png").touch()
-            
-        print("✅ CholeraSeq Tree Module Complete (Stub Mode).")
-        sys.exit(0)
-
     # 1. Extract Sample Loci
     print("Step 1: Extracting Sample Core Loci...")
     sample_fasta = outdir / "sample_core.fasta"
@@ -103,7 +75,8 @@ def main():
         # Concatenate multi-record FASTA into single core sequence
         loci_records = list(SeqIO.parse(args.loci, "fasta"))
         if not loci_records:
-            create_stub_outputs("No sequences found in loci file (Low Coverage)")
+            print("Error: No sequences found in loci file.")
+            sys.exit(1)
             
         combined_seq = "".join(str(rec.seq) for rec in loci_records)
         sample_rec = SeqRecord(Seq(combined_seq), id=args.sample_id, description=f"Core loci from {args.loci}")
@@ -111,13 +84,50 @@ def main():
     else:
         sample_rec = extract_loci_from_bed(args.consensus, str(bed_path), args.sample_id)
         if not sample_rec:
-            create_stub_outputs("Failed to extract sample loci (Low Coverage)")
+            print("Error: Failed to extract sample loci")
+            sys.exit(1)
         SeqIO.write(sample_rec, sample_fasta, "fasta")
     
     # 1b. Check sequence quality
     is_valid, qc_message = check_sequence_quality(sample_rec, ref_alignment)
     if not is_valid:
-        create_stub_outputs(f"Sample sequence quality insufficient: {qc_message}")
+        print(f"⚠️  WARNING: Sample sequence quality insufficient: {qc_message}")
+        print("Creating fallback reference-only tree using simple distance method...")
+        
+        # For zero-coverage samples, just create a minimal tree from references
+        final_tree_path = outdir / "tree.nwk"
+        shutil.copy(ref_alignment, outdir / "merged_core_alignment.fasta")
+        
+        # Use shared UPGMA utility
+        try:
+            if build_upgma_tree(str(ref_alignment), str(final_tree_path), method="upgma"):
+                # Generate PNG using shared utility
+                render_tree_png(
+                    str(final_tree_path),
+                    str(outdir / "tree.png"),
+                    title=f"CholeraSeq Reference Phylogeny\n(Sample QC: {qc_message})"
+                )
+                print("✅ CholeraSeq Tree Module Complete (Reference-Only UPGMA Mode).")
+        except Exception as e:
+            print(f"Warning: Could not create tree: {e}")
+            # Create stub files
+            with open(final_tree_path, 'w') as f:
+                f.write("();\n")
+            
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+            
+            fig = plt.figure(figsize=(8, 6))
+            plt.text(0.5, 0.5, f"Phylogeny unavailable\n{qc_message}", 
+                    ha='center', va='center', fontsize=14)
+            plt.axis('off')
+            plt.savefig(outdir / "tree.png", dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            
+            print("✅ CholeraSeq Tree Module Complete (Stub Mode).")
+        
+        return
 
     # 2. Filter empty sequences from reference alignment (IQ-TREE fix)
     print("Step 2a: Filtering empty sequences from reference alignment...")

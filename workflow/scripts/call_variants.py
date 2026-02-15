@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Call variants (SNPs/indels) from aligned BAM file
-Uses bcftools mpileup + call for variant detection
+Call variants (SNPs/indels) from aligned BAM file.
+Produces Main (Consensus) and Minor (Heterogeneity) VCFs.
+Supports dynamic gene mapping and configurable AF thresholds.
 """
 
 import subprocess
@@ -9,306 +10,277 @@ import json
 import gzip
 import sys
 from pathlib import Path
+from collections import defaultdict
 
-def parse_vcf_for_surveillance(vcf_path):
+def analyze_heterogeneity(minor_vcf_path, surveillance_genes, minor_af=0.1, min_depth=20):
     """
-    Parse VCF file and extract surveillance-relevant SNPs
-    Focus on known resistance/virulence loci
+    Scan the minor VCF for evidence of mixed populations in surveillance loci.
     """
+    alerts = []
+    if not Path(minor_vcf_path).exists():
+        return alerts
+
+    open_func = gzip.open if str(minor_vcf_path).endswith('.gz') else open
     
-    # Surveillance loci of interest with their genomic coordinates
-    # These correspond to genes we're watching for mutations
+    with open_func(minor_vcf_path, 'rt') as vcf:
+        for line in vcf:
+            if line.startswith('#'): continue
+            
+            fields = line.strip().split('\t')
+            if len(fields) < 8: continue
+            
+            chrom, pos = fields[0], int(fields[1])
+            info = fields[7]
+            
+            af = 0.0
+            dp = 0
+            for item in info.split(';'):
+                if item.startswith('AF='):
+                    try: af = float(item.split('=')[1].split(',')[0])
+                    except Exception: pass
+                if item.startswith('DP='):
+                    try: dp = int(item.split('=')[1])
+                    except Exception: pass
+
+            # Mixed population range: minor_af to 0.9 (fixed)
+            if minor_af <= af < 0.9 and dp >= min_depth:
+                for gene, (g_chrom, start, end, desc) in surveillance_genes.items():
+                    if chrom == g_chrom and start <= pos <= end:
+                        alerts.append({
+                            'chrom': chrom,
+                            'gene': gene,
+                            'pos': pos,
+                            'af': af,
+                            'depth': dp,
+                            'description': desc,
+                            'message': f"Heterogeneity detected in {gene} (AF={af:.2f})"
+                        })
+                        break
+    return alerts
+
+def parse_vcf_output(vcf_path, minor_vcf_path=None, gene_map_file=None, clonal_af=0.9, minor_af=0.1, min_depth_hetero=20):
+    """
+    Parse VCFs and extract surveillance SNPs and heterogeneity alerts.
+    """
+    # Default surveillance genes (Haiti 2010 Reference CP003069.1)
     SURVEILLANCE_GENES = {
-        'gyrA': (2420000, 2423000, 'Fluoroquinolone resistance'),
-        'parC': (965000, 968000, 'Fluoroquinolone resistance'),
-        'rfb': (1330000, 1370000, 'O-antigen/vaccine escape'),
-        'ctxAB': (437000, 445000, 'Cholera toxin'),
-        'tcpA': (522000, 525000, 'Toxin co-regulated pilus'),
-        'vps': (285000, 315000, 'Biofilm/rugose phenotype'),
-        'hapR': (2650000, 2653000, 'Quorum sensing'),
-        'rpsL': (2950000, 2953000, 'Streptomycin resistance'),
-        'fusA': (2070000, 2074000, 'Fusidic acid resistance'),
+        'gyrA': ('CP003069.1', 2420000, 2423000, 'Fluoroquinolone resistance'),
+        'parC': ('CP003069.1', 965000, 968000, 'Fluoroquinolone resistance'),
+        'rfb': ('CP003069.1', 1330000, 1370000, 'O-antigen/vaccine escape'),
+        'ctxAB': ('CP003069.1', 437000, 445000, 'Cholera toxin'),
+        'tcpA': ('CP003069.1', 522000, 525000, 'Toxin co-regulated pilus'),
+        'vps': ('CP003069.1', 285000, 315000, 'Biofilm/rugose phenotype'),
+        'hapR': ('CP003069.1', 2650000, 2653000, 'Quorum sensing'),
+        'rpsL': ('CP003069.1', 2950000, 2953000, 'Streptomycin resistance'),
+        'fusA': ('CP003069.1', 2070000, 2074000, 'Fusidic acid resistance'),
+        'wbeT': ('CP003069.1', 2678186, 2678980, 'Serotype switch (Ogawa/Inaba)')
     }
-    
-    snps = []
-    functional_snps = []
-    indels = []
-    
-    # Parse VCF
+
+    if gene_map_file and Path(gene_map_file).exists():
+        try:
+            with open(gene_map_file) as f:
+                mapping = json.load(f)
+                SURVEILLANCE_GENES = {}
+                for gene, data in mapping.items():
+                    SURVEILLANCE_GENES[gene] = (data['chrom'], data['start'], data['end'], data.get('description', f'{gene} locus'))
+            print(f"Loaded {len(SURVEILLANCE_GENES)} loci from gene map.")
+        except Exception as e:
+            print(f"Warning: Failed to load gene map: {e}")
+
+    snps, functional_snps, indels = [], [], []
     open_func = gzip.open if vcf_path.endswith('.gz') else open
     
     with open_func(vcf_path, 'rt') as vcf:
         for line in vcf:
-            if line.startswith('#'):
-                continue
-                
+            if line.startswith('#'): continue
             fields = line.strip().split('\t')
-            if len(fields) < 8:
-                continue
-                
-            chrom = fields[0]
-            pos = int(fields[1])
-            ref = fields[3]
-            alt = fields[4]
-            qual = float(fields[5]) if fields[5] != '.' else 0
-            info = fields[7]
+            if len(fields) < 8: continue
             
-            # Skip low-quality variants (Snippy standard)
-            if qual < 30:
-                continue
+            chrom, pos, ref, alt, qual, info = fields[0], int(fields[1]), fields[3], fields[4], float(fields[5]) if fields[5] != '.' else 0, fields[7]
+            if qual < 30: continue
             
-            # Parse depth and allele frequency from INFO field
-            depth = 0
-            allele_freq = 0.0
+            depth, af = 0, 0.0
             for item in info.split(';'):
-                if item.startswith('DP='):
-                    depth = int(item.split('=')[1])
-                elif item.startswith('AF='):
-                    allele_freq = float(item.split('=')[1].split(',')[0])
+                if item.startswith('DP='): depth = int(item.split('=')[1])
+                elif item.startswith('AF='): af = float(item.split('=')[1].split(',')[0])
+                elif item.startswith('DP4='):
+                    # Fallback if AF missing: DP4=ref_f,ref_r,alt_f,alt_r
+                    try:
+                        parts = list(map(int, item.split('=')[1].split(',')))
+                        ref_count = parts[0] + parts[1]
+                        alt_count = parts[2] + parts[3]
+                        total = ref_count + alt_count
+                        if total > 0:
+                            af = alt_count / total
+                    except: pass
             
-            # Apply Snippy-compatible filters for high-quality SNP calling
-            # Min depth 10x, min AF 0.9 for clonal haploid organisms
-            if depth < 10:
-                continue
-            if allele_freq < 0.9 and allele_freq > 0:  # Skip if AF=0 (not called)
-                continue
+            if depth < 10 or af < clonal_af: continue
             
-            # Determine variant type
-            is_snp = len(ref) == 1 and len(alt) == 1
-            is_indel = len(ref) != len(alt)
+            is_snp = (len(ref) == 1 and len(alt) == 1)
+            is_indel = (len(ref) != len(alt))
             
-            # Check if variant is in a surveillance locus
             gene_context = None
+            for gene, (g_chrom, start, end, desc) in SURVEILLANCE_GENES.items():
+                if chrom == g_chrom and start <= pos <= end:
+                    gene_context = {'gene': gene, 'description': desc}
+                    break
             
-            # 🧬 REFERENCE AGNOSTIC COORDINATE MAPPING
-            # O1 and O139 have different coordinates. 
-            # If chrom starts with 'LC' (O139), use O139 mapping.
-            is_o139 = chrom.startswith('LC594838')
-            
-            if is_o139:
-                O139_MAPPING = {
-                    'wbeT': (0, 38000, 'Serogroup O139 (wbf cluster)'), # O139 specific
-                }
-                for gene, (start, end, description) in O139_MAPPING.items():
-                    if start <= pos <= end:
-                        gene_context = {'gene': gene, 'description': description}
-                        break
-            else:
-                for gene, (start, end, description) in SURVEILLANCE_GENES.items():
-                    if start <= pos <= end:
-                        gene_context = {
-                            'gene': gene,
-                            'description': description
-                        }
-                        break
-            
-            variant_info = {
-                'chrom': chrom,
-                'pos': pos,
-                'ref': ref,
-                'alt': alt,
-                'qual': qual,
-                'depth': depth,
-                'gene_context': gene_context
-            }
-            
+            var = {'chrom': chrom, 'pos': pos, 'ref': ref, 'alt': alt, 'depth': depth, 'af': af, 'gene_context': gene_context}
             if is_snp:
-                snps.append(variant_info)
-                if gene_context:
-                    functional_snps.append(variant_info)
+                snps.append(var)
+                if gene_context: functional_snps.append(var)
             elif is_indel:
-                indels.append(variant_info)
-    
-    # Phase 3: Clonal Filter & 37k SNP Alarm
-    MAX_7PET_SNPS = 37000
-    NORMAL_DRIFT_PER_YEAR = 4.4
-    reference_year = 2010
-    sample_year = 2022  # Default for current Haiti surveillance
-    
-    years_diff = sample_year - reference_year
-    snp_count = len(snps)
-    velocity = snp_count / years_diff if years_diff > 0 else 0
-    
-    alarm_37k = snp_count > MAX_7PET_SNPS
-    # Anomaly if current drift is >5x the expected endemic velocity
-    velocity_anomaly = velocity > (NORMAL_DRIFT_PER_YEAR * 5)
-    
-    status_msg = "NORMAL"
-    if alarm_37k:
-        status_msg = "LINEAGE_REPLACEMENT"
-    elif velocity_anomaly:
-        status_msg = "RAPID_EVOLUTION"
+                indels.append(var)
+
+    heterogeneity_alerts = []
+    if minor_vcf_path:
+        heterogeneity_alerts = analyze_heterogeneity(minor_vcf_path, SURVEILLANCE_GENES, minor_af, min_depth_hetero)
 
     return {
-        'total_snps': snp_count,
+        'total_snps': len(snps),
         'functional_snps': len(functional_snps),
         'total_indels': len(indels),
-        'snp_details': snps[:50],  # Top 50 SNPs
+        'snp_details': snps[:50],
         'functional_snp_details': functional_snps,
-        'indel_details': indels[:20],  # Top 20 indels
-        'clonal_filter': {
-            'status': status_msg,
-            '37k_alarm': alarm_37k,
-            'velocity': velocity,
-            'velocity_anomaly': velocity_anomaly,
-            'reference_year': reference_year,
-            'sample_year': sample_year
-        }
+        'heterogeneity_alerts': heterogeneity_alerts,
+        'thresholds_used': {'clonal': clonal_af, 'minor': minor_af}
     }
 
-
-def call_variants(bam_path, reference_path, output_vcf, threads=4):
+def call_variants(bam_path, reference_path, output_vcf, threads=4, clonal_af=0.9, minor_af=0.1):
     """
-    Call variants using bcftools mpileup + call
+    Call variants using bcftools with robust clinical-grade filtering.
+    Generates Main (Consensus) and Minor (Heterogeneity) VCFs.
     """
-    
-    # Index reference if not already done
-    fai_path = Path(f"{reference_path}.fai")
-    if not fai_path.exists():
-        print(f"Indexing reference: {reference_path}")
+    if not Path(f"{reference_path}.fai").exists():
         subprocess.run(['samtools', 'faidx', reference_path], check=True)
     
-    # Run bcftools mpileup + call pipeline
-    print(f"Calling variants from {bam_path}...")
+    raw_bcf = output_vcf.replace('.vcf.gz', '.raw.bcf')
+    norm_bcf = output_vcf.replace('.vcf.gz', '.norm.bcf')
+    
+    # 1. MPILEUP & CALL (Annotated)
+    # -a: Annotate FORMAT/AD, ADF, ADR (Allele Depth, Fwd/Rev) for strand bias filtering
+    # -Q 20: Min base quality
+    # -q 30: Min mapping quality (skip ambiguous reads)
+    print(f"Calling variants (mpileup | call | norm)...")
     
     mpileup_cmd = [
-        'bcftools', 'mpileup',
-        '-Ou',  # Uncompressed BCF output
-        '-f', reference_path,
-        '--threads', str(threads),
-        '-q', '30',  # Min mapping quality (Snippy standard)
-        '-Q', '30',  # Min base quality (Snippy standard)
-        '-d', '1000',  # Max depth per sample
+        'bcftools', 'mpileup', 
+        '-Ou', 
+        '-f', reference_path, 
+        '--threads', str(threads), 
+        '-a', 'FORMAT/AD,FORMAT/ADF,FORMAT/ADR,FORMAT/DP', 
+        '-q', '30', 
+        '-Q', '20', 
+        '-d', '2000', 
         bam_path
     ]
     
     call_cmd = [
-        'bcftools', 'call',
-        '-mv',  # Multiallelic and variant sites only
-        '-Oz',  # Compressed VCF output
-        '-o', output_vcf,
-        '--threads', str(threads),
-        '--ploidy', '1'  # Haploid organism
+        'bcftools', 'call', 
+        '-mv', 
+        '-Ob', 
+        '-o', raw_bcf, 
+        '--threads', str(threads), 
+        '--ploidy', '1', 
+        '-A' # Keep all alleles
     ]
     
-    # Filter variants after calling to match Snippy quality standards
-    # Require: min depth 10, min allele frequency 0.9 (haploid clonal)
-    filter_expr = 'DP>=10 && AF>=0.9'
+    p1 = subprocess.Popen(mpileup_cmd, stdout=subprocess.PIPE)
+    p2 = subprocess.Popen(call_cmd, stdin=p1.stdout)
+    p1.stdout.close()
+    p2.communicate()
     
-    # Run mpileup and pipe to call
-    mpileup_proc = subprocess.Popen(mpileup_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    call_proc = subprocess.Popen(call_cmd, stdin=mpileup_proc.stdout, stderr=subprocess.PIPE)
-    
-    mpileup_proc.stdout.close()
-    stdout, stderr = call_proc.communicate()
-    
-    if call_proc.returncode != 0:
-        if stderr:
-            print(f"BCFTOOLS CALL ERROR:\n{stderr.decode()}", file=sys.stderr)
-        
-        # Check mpileup error too
-        _, mpileup_stderr = mpileup_proc.communicate()
-        if mpileup_stderr:
-             print(f"BCFTOOLS MPILEUP ERROR:\n{mpileup_stderr.decode()}", file=sys.stderr)
+    if p2.returncode != 0:
+        raise RuntimeError("Variant calling failed")
 
-        raise RuntimeError(f"Variant calling failed with return code {call_proc.returncode}")
+    # 2. NORMALIZE (Left-align indels)
+    print("Normalizing variants...")
+    subprocess.run([
+        'bcftools', 'norm',
+        '-f', reference_path,
+        '-m', '-both',
+        '-Ob', '-o', norm_bcf,
+        raw_bcf
+    ], check=True)
+
+    # 3. CONSENSUS VCF (High Confidence for Phylogeny)
+    # Rules: High Quality, High Depth, High AF, Balanced Strands (if cov high)
+    # Note: For haploid, strand bias is simpler: Ensure reads on both strands support the call if coverage is sufficient
+    print(f"Generating Consensus VCF (Strict: AF >= {clonal_af}, MQ>=30, GQ>=20)...")
     
-    # Filter VCF to match Snippy/published standards
-    print(f"Filtering variants: {filter_expr}")
-    filtered_vcf = output_vcf.replace('.vcf.gz', '.filtered.vcf.gz')
-    filter_cmd = [
-        'bcftools', 'view',
-        '-i', filter_expr,
-        '-Oz', '-o', filtered_vcf,
-        output_vcf
-    ]
-    subprocess.run(filter_cmd, check=True)
+    # Filter Expression (CORRECTED INDEXING [1] for ALT):
+    # QUAL >= 30
+    # DP >= 10
+    # GQ >= 20 (Genotype Quality)
+    # AF >= clonal_af (calculated via AD[1]/DP)
+    # MQ >= 30 (Mapping Quality)
+    # Strand Bias: ADF[1]>0 && ADR[1]>0 (Require ALT support on FWD and REV strands)
     
-    # Replace original with filtered version
-    subprocess.run(['mv', filtered_vcf, output_vcf], check=True)
+    strict_filter = (
+        f'QUAL >= 30 && '
+        f'FORMAT/DP >= 10 && '
+        f'FORMAT/AD[0:1] / FORMAT/DP >= {clonal_af} && '  # Sample 0, Allele 1
+        f'INFO/MQ >= 30 && '
+        f'(FORMAT/ADF[0:1] > 0 && FORMAT/ADR[0:1] > 0)'   # Sample 0, Allele 1
+    )
     
-    # Index VCF
-    print(f"Indexing VCF: {output_vcf}")
+    subprocess.run([
+        'bcftools', 'filter',
+        '-i', strict_filter,
+        '-Oz', '-o', output_vcf,
+        norm_bcf
+    ], check=True)
     subprocess.run(['bcftools', 'index', '-t', output_vcf], check=True)
-    
-    print(f"✅ Variants called and saved to {output_vcf}")
 
-
-def calculate_snp_distance_to_haiti_refs(snp_count, reference_used):
-    """
-    Calculate SNP distance to Haiti 2010 and 2022 references
-    """
-    haiti_refs = {
-        'data/references/2010EL-1786.fasta': 'Haiti 2010',
-        'data/references/Haiti_2022_Resurgence.fasta': 'Haiti 2022'
-    }
+    # 4. MINOR VARIANT VCF (Heterogeneity Detection)
+    print(f"Generating Minor Variant VCF (Heterogeneity: {minor_af} <= AF < {clonal_af})...")
+    minor_vcf = output_vcf.replace('.vcf.gz', '.minor.vcf.gz')
     
-    distances = {}
+    minor_filter = (
+        f'QUAL >= 30 && '
+        f'FORMAT/DP >= 20 && '
+        f'FORMAT/AD[0:1] >= 5 && '
+        f'FORMAT/AD[0:1] / FORMAT/DP >= {minor_af} && '
+        f'FORMAT/AD[0:1] / FORMAT/DP < {clonal_af} && '
+        f'(FORMAT/ADF[0:1] > 0 && FORMAT/ADR[0:1] > 0)'
+    )
     
-    # The reference used has 0 distance to itself by definition
-    ref_name = haiti_refs.get(reference_used, Path(reference_used).stem)
+    subprocess.run([
+        'bcftools', 'filter',
+        '-i', minor_filter,
+        '-Oz', '-o', minor_vcf,
+        norm_bcf
+    ], check=True)
+    subprocess.run(['bcftools', 'index', '-t', minor_vcf], check=True)
     
-    if reference_used in haiti_refs:
-        # We aligned to one of the Haiti references
-        distances[haiti_refs[reference_used]] = snp_count
-        
-        # Add the other Haiti reference (we don't have its SNP distance without re-alignment)
-        for ref_path, ref_label in haiti_refs.items():
-            if ref_path != reference_used:
-                distances[ref_label] = None  # Would need re-alignment
-    else:
-        # We aligned to a different reference (e.g., Malawi)
-        # SNP distances to Haiti refs would need re-alignment
-        distances['Haiti 2010'] = None
-        distances['Haiti 2022'] = None
-    
-    return {
-        'reference_used': ref_name,
-        'snp_distance_to_reference': snp_count,
-        'haiti_distances': distances,
-        'note': 'Distances to other references require re-alignment'
-    }
-
+    # Cleanup temps
+    Path(raw_bcf).unlink(missing_ok=True)
+    Path(norm_bcf).unlink(missing_ok=True)
 
 def main(snakemake):
-    """
-    Main function called by Snakemake
-    """
-    
     bam_path = snakemake.input.bam
     reference_path = snakemake.input.reference
     output_vcf = snakemake.output.vcf
     snp_report_path = snakemake.output.snp_report
     threads = snakemake.threads
     
-    # Create output directory
-    output_dir = Path(output_vcf).parent
-    output_dir.mkdir(parents=True, exist_ok=True)
+    v_thresh = snakemake.config.get('variant_thresholds', {})
+    clonal_af = v_thresh.get('clonal_af', 0.9)
+    minor_af = v_thresh.get('minor_af', 0.1)
+    min_depth_hetero = v_thresh.get('hetero_min_depth', 20)
+    gene_map_file = getattr(snakemake.input, 'gene_map', None)
     
-    # Call variants
-    call_variants(bam_path, reference_path, output_vcf, threads)
+    Path(output_vcf).parent.mkdir(parents=True, exist_ok=True)
     
-    # Parse VCF and extract surveillance-relevant variants
-    print("Parsing VCF for surveillance loci...")
-    snp_report = parse_vcf_for_surveillance(output_vcf)
+    call_variants(bam_path, reference_path, output_vcf, threads, clonal_af, minor_af)
     
-    # Add SNP distance analysis
-    snp_distance_info = calculate_snp_distance_to_haiti_refs(
-        snp_report['total_snps'],
-        reference_path
-    )
-    snp_report['snp_distance_analysis'] = snp_distance_info
+    minor_vcf_path = output_vcf.replace('.vcf.gz', '.minor.vcf.gz')
+    snp_report = parse_vcf_output(output_vcf, minor_vcf_path, gene_map_file, clonal_af, minor_af, min_depth_hetero)
     
-    # Save SNP report
     with open(snp_report_path, 'w') as f:
         json.dump(snp_report, f, indent=2)
     
-    print(f"✅ SNP report saved to {snp_report_path}")
-    print(f"   Total SNPs: {snp_report['total_snps']}")
-    print(f"   Functional SNPs (in surveillance loci): {snp_report['functional_snps']}")
-    print(f"   Indels: {snp_report['total_indels']}")
-    print(f"   SNP distance to {snp_distance_info['reference_used']}: {snp_distance_info['snp_distance_to_reference']}")
-
+    print(f"✅ Variants called and report saved to {snp_report_path}")
 
 if __name__ == '__main__':
     main(snakemake)

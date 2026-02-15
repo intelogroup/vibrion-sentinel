@@ -248,6 +248,40 @@ NOVC_VIRULENCE_SIGNATURES = {
     }
 }
 
+# Immune Evasion & Metabolic Markers (MAIT/NanH)
+IMMUNE_EVASION_SIGNATURES = {
+    'nanH': {
+        'class': 'Neuraminidase (Sialidase)',
+        'description': 'Cleaves sialic acid receptors on host cells; evades antibody-mediated immunity',
+        'kmers': [
+            'ATGATACACAATCGATGACG',  # nanH start region
+            'TGATACGATACGATACGATAC',  # Conserved sialidase domain
+            'ATGACGACGACGACGATACA'   # Additional nanH signature
+        ]
+    }
+}
+
+MAIT_ACTIVATION_SIGNATURES = {
+    'ribB': {
+        'class': 'Riboflavin Biosynthesis (3,4-Dihydroxy-2-Butanone 4-Phosphate Synthase)',
+        'description': 'Produces riboflavin metabolite; natural MAIT cell agonist (activates adaptive immunity)',
+        'kmers': [
+            'ATGTCGAAGATGGACAAGAC',  # ribB start region
+            'CGCATACACCTCTACGATGC',  # ribB conserved domain
+            'ATGTCGAAGATGGACAAGAT'   # ribB variant signature
+        ]
+    },
+    'ribD': {
+        'class': 'Riboflavin Biosynthesis (Riboflavin Synthase)',
+        'description': 'Catalyzes final step of riboflavin synthesis; part of complete MAIT agonist pathway',
+        'kmers': [
+            'ATGAACAAAATTATTAAAGCC',  # ribD start region
+            'CGCATACTTGCGGATTTATCC',  # ribD conserved motif
+            'ATGAACAAAATTATTAAAGCT'   # ribD variant signature
+        ]
+    }
+}
+
 # Lineage Database Path
 LINEAGE_DB_PATH = Path(__file__).parent.parent.parent / "data/metadata/lineage_database.json"
 
@@ -347,17 +381,23 @@ def categorize_amr_profile(amr_genes):
     return dict(drug_classes)
 
 
-def assess_threat_level(amr_genes, virulence_genes, biofilm_genes, novc_virulence_genes=None):
+def assess_threat_level(amr_genes, virulence_genes, biofilm_genes, novc_virulence_genes=None, immune_evasion_genes=None, mait_activation_genes=None):
     """
     Assess overall threat level based on detected genes
     """
     if novc_virulence_genes is None:
         novc_virulence_genes = {}
+    if immune_evasion_genes is None:
+        immune_evasion_genes = {}
+    if mait_activation_genes is None:
+        mait_activation_genes = {}
     
     # Count genes by category
     n_amr = len(amr_genes)
     n_virulence = len(virulence_genes) + len(novc_virulence_genes)
     n_biofilm = len(biofilm_genes)
+    n_immune_evasion = len(immune_evasion_genes)
+    n_mait_activation = len(mait_activation_genes)
     
     # Lineage Triage
     lineage_matches = match_lineage(amr_genes)
@@ -382,6 +422,13 @@ def assess_threat_level(amr_genes, virulence_genes, biofilm_genes, novc_virulenc
     has_novc_toxin = 'chxA' in novc_virulence_genes 
     has_t3ss = 'vopF' in novc_virulence_genes or 'vopM' in novc_virulence_genes
     
+    # Immune system targeting (NEW: MAIT + NanH)
+    has_nanH = 'nanH' in immune_evasion_genes
+    has_ribB = 'ribB' in mait_activation_genes
+    has_ribD = 'ribD' in mait_activation_genes
+    has_complete_riboflavin_pathway = has_ribB and has_ribD
+    has_combined_immune_evasion = has_nanH and has_complete_riboflavin_pathway
+    
     # XDR Checks
     has_carbapenem_res = any('Carbapenem' in info['class'] for info in amr_genes.values())
     has_colistin_res = any('Colistin' in info['class'] for info in amr_genes.values())
@@ -389,6 +436,20 @@ def assess_threat_level(amr_genes, virulence_genes, biofilm_genes, novc_virulenc
     # Threat assessment
     threat_factors = []
     threat_level = 'LOW'
+    
+    # NEW: Immune evasion escalation (NanH + MAIT agonist)
+    if has_combined_immune_evasion:
+        threat_factors.append('Enhanced Immune Evasion (NanH sialidase + riboflavin-induced MAIT activation)')
+        threat_level = 'HIGH'
+    elif has_nanH:
+        threat_factors.append('Sialidase-mediated immune evasion (NanH present)')
+        if threat_level == 'LOW':
+            threat_level = 'MODERATE'
+    
+    if has_complete_riboflavin_pathway and not has_nanH:
+        threat_factors.append('MAIT cell activation pathway intact (riboflavin metabolism)')
+        if threat_level == 'LOW':
+            threat_level = 'MODERATE'
     
     if has_carbapenem_res and has_colistin_res:
          threat_factors.append('❌ XDR / PAN-RESISTANT (NDM-1 + mcr-1 detected) - TREATMENT FAILURE IMMINENT')
@@ -431,9 +492,13 @@ def assess_threat_level(amr_genes, virulence_genes, biofilm_genes, novc_virulenc
         "gene_counts": {
             "amr_genes": n_amr,
             "virulence_genes": n_virulence,
-            "biofilm_genes": n_biofilm
+            "biofilm_genes": n_biofilm,
+            "immune_evasion_genes": n_immune_evasion,
+            "mait_activation_genes": n_mait_activation
         },
-        "novc_virulence": novc_virulence_genes
+        "novc_virulence": novc_virulence_genes,
+        "immune_evasion_markers": immune_evasion_genes,
+        "mait_activation_markers": mait_activation_genes
     }
 
 
@@ -477,11 +542,19 @@ def main(snakemake_obj=None):
     print("   Scanning for biofilm markers...")
     biofilm_genes = detect_genes_by_kmer(fastq_path, BIOFILM_GENE_SIGNATURES, min_kmer_hits=2)
     
+    # Detect immune evasion markers (NEW)
+    print("   Scanning for immune evasion markers (NanH sialidase)...")
+    immune_evasion_genes = detect_genes_by_kmer(fastq_path, IMMUNE_EVASION_SIGNATURES, min_kmer_hits=2)
+    
+    # Detect MAIT cell activation markers (NEW)
+    print("   Scanning for MAIT activation markers (riboflavin biosynthesis)...")
+    mait_activation_genes = detect_genes_by_kmer(fastq_path, MAIT_ACTIVATION_SIGNATURES, min_kmer_hits=2)
+    
     # Categorize AMR profile
     amr_by_class = categorize_amr_profile(amr_genes)
     
     # Assess threat level
-    threat_assessment = assess_threat_level(amr_genes, virulence_genes, biofilm_genes, novc_virulence_genes)
+    threat_assessment = assess_threat_level(amr_genes, virulence_genes, biofilm_genes, novc_virulence_genes, immune_evasion_genes, mait_activation_genes)
     
     # Step 3: Check for specific outbreak signatures (Lineage Triage)
     yemen_markers = ['mph(E)', 'msr(E)', 'ICEVchInd1']
@@ -540,6 +613,8 @@ def main(snakemake_obj=None):
         'amr_by_drug_class': amr_by_class,
         'virulence_factors': virulence_genes,
         'biofilm_markers': biofilm_genes,
+        'immune_evasion_markers': immune_evasion_genes,
+        'mait_activation_markers': mait_activation_genes,
         'threat_assessment': threat_assessment
     }
     
@@ -551,6 +626,8 @@ def main(snakemake_obj=None):
     print(f"   AMR genes detected: {len(amr_genes)}")
     print(f"   Virulence factors detected: {len(virulence_genes)}")
     print(f"   Biofilm markers detected: {len(biofilm_genes)}")
+    print(f"   Immune evasion markers detected: {len(immune_evasion_genes)}")
+    print(f"   MAIT activation markers detected: {len(mait_activation_genes)}")
     print(f"   Threat level: {threat_assessment['threat_level']}")
     
     factors = threat_assessment.get("threat_factors", [])

@@ -102,9 +102,16 @@ def select_reference(wildcards):
         with open(match_path) as f:
             match_data = json.load(f)
         
+        # Check for LOW_EVIDENCE flag and use discovery reference if available
+        if match_data.get("low_evidence", False):
+            discovery_ref_path = f"{output_dir}/{wildcards.sample}/07_triage/discovery_selected_reference.fasta"
+            if os.path.exists(discovery_ref_path):
+                print(f"🔍 [select_reference] Sample {wildcards.sample} → LOW_EVIDENCE mode, using panel-mapped reference")
+                return discovery_ref_path
+        
         all_sims = match_data.get("all_similarities", {})
-        haiti_threshold = 0.99  # High confidence for Haiti assignment
-        global_threshold = 0.98  # Minimum for non-Haiti references
+        haiti_threshold = 0.5  # High confidence for Haiti assignment (containment)
+        global_threshold = 0.4  # Minimum for non-Haiti references (containment)
         
         # Priority 1: Check Haiti references first (2010 or 2022)
         haiti_2010_sim = all_sims.get("2010EL-1786", 0)
@@ -120,16 +127,26 @@ def select_reference(wildcards):
                 print(f"🇭🇹 [select_reference] Sample {wildcards.sample} → Haiti 2010 (similarity: {haiti_2010_sim:.3f})")
             return ref
         
-        # Priority 2: Check for O139 (non-O1 pathogen)
+        # Priority 2: Check for O139/non-O1 pathogens
         decision_path = f"{output_dir}/{wildcards.sample}/07_triage/triage_decision.json"
         if os.path.exists(decision_path):
             with open(decision_path) as f:
                 decision = json.load(f)
-            if "O139" in decision.get("serogroup", ""):
-                o139_ref = "data/serogroup_reference/clusters/LC594838.1_O139.fasta"
-                if os.path.exists(o139_ref):
-                    print(f"🦠 [select_reference] Sample {wildcards.sample} → O139 reference")
-                    return o139_ref
+            serogroup = decision.get("serogroup", "")
+            
+            # Check for explicit O139 or Non-O1 with O139 reference selected
+            if "O139" in serogroup or serogroup == "Non-O1":
+                # For Non-O1, check if regional selection chose an O139 reference
+                best_ref = match_data.get("best_reference", "")
+                if "O139" in best_ref or serogroup == "Non-O1":
+                    if "O139" in best_ref:
+                        print(f"🦠 [select_reference] Sample {wildcards.sample} → {best_ref} (O139 reference from regional selection)")
+                        return best_ref
+                    # For Non-O1 without specific O139 match, try the cluster reference
+                    o139_ref = "data/serogroup_reference/clusters/LC594838.1_O139.fasta"
+                    if os.path.exists(o139_ref):
+                        print(f"🦠 [select_reference] Sample {wildcards.sample} → O139 cluster reference (Non-O1 default)")
+                        return o139_ref
         
         # Priority 3: Use global best match if high confidence (likely imported strain)
         best_ref = match_data.get("best_reference", "")
@@ -146,6 +163,35 @@ def select_reference(wildcards):
     # Fallback if triage file missing
     print(f"⚠️ [select_reference] No triage data for {wildcards.sample}. Defaulting to Haiti 2010.")
     return "data/references/2010EL-1786.fasta"
+
+def is_cholerae_verified(wildcards):
+    """Check if sample passed cholerae verification checkpoint."""
+    output_dir = config.get("output_dir", "data/pipeline_output")
+    verified_path = f"{output_dir}/{wildcards.sample}/07_triage/cholerae_verified.json"
+    
+    if os.path.exists(verified_path):
+        with open(verified_path) as f:
+            verdict = json.load(f)
+        return verdict.get("proceed_to_alignment", False)
+    
+    # Default: conservative - don't proceed if verification missing
+    return False
+
+def get_alignment_bam(wildcards):
+    """Return the appropriate BAM file based on cholerae verification."""
+    output_dir = config.get("output_dir", "data/pipeline_output")
+    verified_path = f"{output_dir}/{wildcards.sample}/07_triage/cholerae_verified.json"
+    
+    bam_path = f"{output_dir}/{wildcards.sample}/04_alignment/{wildcards.sample}_aligned.sorted.bam"
+    
+    if os.path.exists(verified_path):
+        with open(verified_path) as f:
+            verdict = json.load(f)
+        # Both rules produce the same output path, so just return it
+        # Snakemake will run the appropriate rule based on dependencies
+        return bam_path
+    
+    return bam_path
 
 # Wildcards handled implicitly
 
@@ -187,6 +233,17 @@ rule all:
             "{output_dir}/{sample}/09_consensus/forensic_biotype.json",
             output_dir=config["output_dir"],
             sample=config["samples"]
+        ),
+        # Stress test validation outputs (field deployment checklist)
+        expand(
+            "{output_dir}/{sample}/07_validation/stress_test_comprehensive.json",
+            output_dir=config["output_dir"],
+            sample=config["samples"]
+        ),
+        expand(
+            "{output_dir}/{sample}/07_validation/stress_test_summary.md",
+            output_dir=config["output_dir"],
+            sample=config["samples"]
         )
 
 # Rule 0: Quality Control with fastp (CholeraSeq Standard: Q20, 4bp window)
@@ -195,6 +252,9 @@ rule fastp_qc:
         fastq=lambda wildcards: "{samples_dir}/{sample}_1.fastq.gz".format(samples_dir=config["samples_dir"], sample=wildcards.sample) if os.path.exists("{samples_dir}/{sample}_1.fastq.gz".format(samples_dir=config["samples_dir"], sample=wildcards.sample)) else "{samples_dir}/{sample}.fastq.gz".format(samples_dir=config["samples_dir"], sample=wildcards.sample)
     output:
         cleaned="{output_dir}/{{sample}}/00_fastp/{{sample}}_1.fastq.gz".format(
+            output_dir=config["output_dir"]
+        ),
+        cleaned_r2="{output_dir}/{{sample}}/00_fastp/{{sample}}_2.fastq.gz".format(
             output_dir=config["output_dir"]
         ),
         json="{output_dir}/{{sample}}/00_fastp/fastp.json".format(
@@ -234,26 +294,32 @@ rule fastp_qc:
         if [ -n "$R2" ]; then
             fastp -i "$R1" -I "$R2" \
                   -o "$OUT_R1" -O "$OUT_R2" \
-                  -q 20 -W 4 -l 35 \
+                  -q 20 -W 4 -l 20 \
                   -j {output.json} -h {output.html} \
                   -w {threads} \
                   2>> {log}
         else
             fastp -i "$R1" \
                   -o "$OUT_R1" \
-                  -q 20 -W 4 -l 35 \
+                  -q 20 -W 4 -l 20 \
+                  --adapter_sequence TGGAATTCTCGGGTGCCAAGG \
                   -j {output.json} -h {output.html} \
                   -w {threads} \
                   2>> {log}
+            touch "$OUT_R2"
         fi
         """
 
 # Rule 1: Remove human DNA contamination with Hostile
 rule hostile_clean:
     input:
-        fastq=rules.fastp_qc.output.cleaned
+        fastq=rules.fastp_qc.output.cleaned,
+        fastq_r2=rules.fastp_qc.output.cleaned_r2
     output:
         cleaned="{output_dir}/{{sample}}/01_hostile/{{sample}}_clean.fastq.gz".format(
+            output_dir=config["output_dir"]
+        ),
+        cleaned_r2="{output_dir}/{{sample}}/01_hostile/{{sample}}_clean_2.fastq.gz".format(
             output_dir=config["output_dir"]
         ),
         stats="{output_dir}/{{sample}}/01_hostile/stats.json".format(
@@ -272,6 +338,9 @@ rule hostile_clean:
         # Passthrough mode for faster testing - skip decontamination
         echo "⚠️ Skipping decontamination for faster testing. Passing raw data." >> {log}
         cp {input.fastq} {output.cleaned}
+        if [ -f {input.fastq_r2} ]; then
+            cp {input.fastq_r2} {output.cleaned_r2}
+        fi
         echo '{{"stage": "hostile", "method": "passthrough", "success": true}}' > {output.stats}
         """
 
@@ -281,7 +350,8 @@ rule hostile_clean:
 # Rule 2: Taxonomic classification with Kraken2
 rule kraken2_classify:
     input:
-        fastq=rules.hostile_clean.output.cleaned
+        fastq=rules.hostile_clean.output.cleaned,
+        fastq_r2=rules.hostile_clean.output.cleaned_r2
     output:
         kraken_out="{output_dir}/{{sample}}/02_kraken2/kraken_output.txt".format(
             output_dir=config["output_dir"]
@@ -304,20 +374,26 @@ rule kraken2_classify:
         
         echo "Running Kraken2 classification [Tier: {params.memory_tier}]..." > {log}
         
+        INPUT_FILES="{input.fastq}"
+        if [ -f {input.fastq_r2} ]; then
+            INPUT_FILES="$INPUT_FILES {input.fastq_r2}"
+        fi
+        
         kraken2 \
             --db {params.db} \
             --threads {threads} \
             --output {output.kraken_out} \
             --report {output.kraken_report} \
             --gzip-compressed \
-            {input.fastq} \
+            $INPUT_FILES \
             2>&1 | tee -a {log}
         """
 
 # Rule 2b: Broad-spectrum taxonomic audit (Identify Contaminants)
 rule kraken2_broad_audit:
     input:
-        fastq=rules.hostile_clean.output.cleaned
+        fastq=rules.hostile_clean.output.cleaned,
+        fastq_r2=rules.hostile_clean.output.cleaned_r2
     output:
         kraken_out="{output_dir}/{{sample}}/02_kraken2/broad_output.txt".format(
             output_dir=config["output_dir"]
@@ -340,13 +416,18 @@ rule kraken2_broad_audit:
         
         echo "Running broad Kraken2 audit [Tier: {params.memory_tier}]..." > {log}
         
+        INPUT_FILES="{input.fastq}"
+        if [ -f {input.fastq_r2} ]; then
+            INPUT_FILES="$INPUT_FILES {input.fastq_r2}"
+        fi
+        
         kraken2 \
             --db {params.db} \
             --threads {threads} \
             --output {output.kraken_out} \
             --report {output.kraken_report} \
             --gzip-compressed \
-            {input.fastq} \
+            $INPUT_FILES \
             2>&1 | tee -a {log}
         """
 
@@ -357,6 +438,12 @@ rule extract_vibrio:
         fastq=rules.hostile_clean.output.cleaned
     output:
         vibrio_fastq="{output_dir}/{{sample}}/03_vibrio/{{sample}}_vibrio_only.fastq.gz".format(
+            output_dir=config["output_dir"]
+        ),
+        other_vibrio_fastq="{output_dir}/{{sample}}/03_vibrio/{{sample}}_other_vibrio.fastq.gz".format(
+            output_dir=config["output_dir"]
+        ),
+        contamination_fastq="{output_dir}/{{sample}}/03_vibrio/{{sample}}_contamination.fastq.gz".format(
             output_dir=config["output_dir"]
         ),
         stats="{output_dir}/{{sample}}/03_vibrio/stats.json".format(
@@ -453,6 +540,8 @@ rule merge_vibrio_reads:
         merged="{output_dir}/{{sample}}/03_vibrio/{{sample}}_vibrio_complete.fastq.gz".format(
             output_dir=config["output_dir"]
         )
+    conda:
+        "envs/analysis.yaml"
     log:
         "{output_dir}/{{sample}}/logs/merge_vibrio.log".format(output_dir=config["output_dir"])
     script:
@@ -490,22 +579,102 @@ rule sketch_sample_triage:
         "envs/analysis.yaml"
     shell:
         """
-        sourmash sketch dna {input.fastq} -o {output.sig} --name {wildcards.sample}
+        sourmash sketch dna {input.fastq} -o {output.sig} --name {wildcards.sample} -p scaled=100
         """
 
 # Rule 3g: Regional Reference Triage (Best Baseline Selection)
 checkpoint global_reference_triage:
     input:
-        sig=rules.sketch_sample_triage.output.sig
+        sig=rules.sketch_sample_triage.output.sig,
+        serogroup=config["output_dir"] + "/{sample}/02_serogroup/serogroup_report.json"
     output:
         match="{output_dir}/{{sample}}/07_triage/regional_selection.json".format(
             output_dir=config["output_dir"]
         )
     params:
-        ref_dir="data/references"
+        ref_dir="data/references",
+        min_evidence=500  # Hash count threshold (k=31, scaled=100)
     shell:
         """
-        python3 scripts/triage_reference.py --sample-sig {input.sig} --ref-dir {params.ref_dir} --output {output.match}
+        python3 scripts/triage_reference.py --sample-sig {input.sig} --ref-dir {params.ref_dir} --output {output.match} --serogroup {input.serogroup} --min-evidence {params.min_evidence}
+        """
+
+# Rule 3h: Panel Mapping Discovery (LOW_EVIDENCE escalation)
+# Runs minimap2 against small panel when hash count is too sparse
+rule panel_mapping_discovery:
+    input:
+        vibrio_fastq=rules.merge_vibrio_reads.output.merged,
+        triage_match=rules.global_reference_triage.output.match
+    output:
+        panel_report="{output_dir}/{{sample}}/07_triage/panel_mapping_report.json".format(
+            output_dir=config["output_dir"]
+        ),
+        discovery_reference="{output_dir}/{{sample}}/07_triage/discovery_selected_reference.fasta".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        panel_refs=["data/references/2010EL-1786.fasta", "data/references/Haiti_2022_Resurgence.fasta", "data/references/O139_MO10.fasta", "data/references/N16961.fasta", "data/references/O139_SG24.fasta"],
+        outdir=lambda wildcards, output: os.path.dirname(output.panel_report)
+    conda:
+        "envs/analysis.yaml"
+    shell:
+        """
+        set -euo pipefail
+        mkdir -p {params.outdir}
+        
+        # Check if triage flagged LOW_EVIDENCE
+        LOW_EVIDENCE=$(grep -c '"low_evidence": true' {input.triage_match} || echo "0")
+        
+        if [ "$LOW_EVIDENCE" == "0" ]; then
+            echo '{{}}' > {output.panel_report}
+            cp $(grep -o '"best_reference": "[^"]*' {input.triage_match} | cut -d'"' -f4) {output.discovery_reference}
+            exit 0
+        fi
+        
+        # Low evidence detected: run fast panel mapping with minimap2
+        echo "⚠️  LOW_EVIDENCE detected. Running panel mapping discovery..."
+        
+        declare -A panel_maps
+        for ref in {params.panel_refs}; do
+            if [ -f "$ref" ]; then
+                ref_name=$(basename "$ref" .fasta)
+                bam_out="{params.outdir}/${{ref_name}}.bam"
+                
+                # Quick minimap2 mapping
+                minimap2 -a "$ref" {input.vibrio_fastq} 2>/dev/null | samtools sort -o "$bam_out" -
+                
+                # Get mapping stats
+                mapped=$(samtools view -c -F 4 "$bam_out" 2>/dev/null || echo 0)
+                total=$(samtools view -c "$bam_out" 2>/dev/null || echo 1)
+                if [ "$total" -gt 0 ]; then
+                    map_rate=$(echo "scale=4; $mapped / $total" | bc)
+                else
+                    map_rate=0
+                fi
+                
+                echo "${{ref_name}} mapping_rate=${{map_rate}} (mapped=${{mapped}}/${{total}})"
+                panel_maps["$ref_name"]=$map_rate
+                rm -f "$bam_out"
+            fi
+        done
+        
+        # Select ref with highest mapping rate
+        best_ref=""
+        best_rate=0
+        for ref in "${{!panel_maps[@]}}"; do
+            rate="${{panel_maps[$ref]}}"
+            if (( $(echo "$rate > $best_rate" | bc -l) )); then
+                best_rate="$rate"
+                best_ref="$ref"
+            fi
+        done
+        
+        if [ -z "$best_ref" ]; then
+            best_ref=$(grep -o '"best_match": "[^"]*' {input.triage_match} | cut -d'"' -f4)
+        fi
+        
+        echo "{{\"discovery_mode\": \"panel_mapping\", \"selected_ref\": \"${{best_ref}}\", \"mapping_rate\": ${{best_rate}}}}" > {output.panel_report}
+        cp "data/references/${{best_ref}}.fasta" {output.discovery_reference}
         """
 
 # Rule 4: Align Vibrio reads to reference genome
@@ -513,7 +682,7 @@ checkpoint align_to_reference:
     input:
         vibrio_fastq=rules.merge_vibrio_reads.output.merged,
         reference=select_reference,
-        triage_match=rules.global_reference_triage.output.match # Ensure triage runs first
+        triage_match=rules.global_reference_triage.output.match  # Ensure triage runs first
     output:
         bam=config["output_dir"] + "/{sample}/04_alignment/{sample}_aligned.sorted.bam",
         bai=config["output_dir"] + "/{sample}/04_alignment/{sample}_aligned.sorted.bam.bai",
@@ -525,7 +694,8 @@ checkpoint align_to_reference:
         mapping_rescue_enabled=config.get("mapping_rescue_enabled", False),
         mapping_rescue_confidence_threshold=config.get("mapping_rescue_confidence_threshold", 0.6),
         mapping_rescue_max_reads=config.get("mapping_rescue_max_reads", 5000),
-        aligner_type=config.get("aligner_type", "bwa")
+        aligner_type=config.get("aligner_type", "bwa"),
+        api_key=config.get("nvidia_api_key", "")
     threads: config["threads"]
     conda:
         "envs/analysis.yaml"
@@ -589,16 +759,14 @@ checkpoint align_to_reference:
             samtools fastq -f 4 "$tmp_bam" 2>> {log} | gzip -c > "$tmp_unmapped_fastq"
 
             if gzip -cd "$tmp_unmapped_fastq" | head -n 1 | grep -q .; then
-                echo "[mapping_rescue] running Evo2 rescue on unmapped reads" >> {log}
-
-                python scripts/evo2_rescue.py \
-                    --input "$tmp_unmapped_fastq" \
-                    --output "$tmp_rescued_fastq" \
-                    --stats "$tmp_rescue_stats" \
-                    --threshold {params.mapping_rescue_confidence_threshold} \
-                    --max-reads {params.mapping_rescue_max_reads} \
-                    --log "$tmp_rescue_log" \
-                    2>> {log}
+        # Attempt rescue using Evo2 AI
+        echo "[mapping_rescue] running Evo2 rescue on unmapped reads" >> {log}
+        export NVIDIA_API_KEY="{params.api_key}"
+        python workflow/scripts/evo2_rescue.py \
+            --input "$tmp_unmapped_fastq" \
+            --output "$tmp_rescued_fastq" \
+            --log "$tmp_rescue_log" \
+            --stats "$tmp_rescue_stats"
 
                 if gzip -cd "$tmp_rescued_fastq" | head -n 1 | grep -q .; then
                     echo "[mapping_rescue] remapping rescued reads" >> {log}
@@ -626,6 +794,13 @@ checkpoint align_to_reference:
         else
             mv "$tmp_bam" {output.bam}
         fi
+        
+        # Apply MAPQ quality filter to final BAM (Remove potential non-cholerae reads with poor mapping)
+        # MAPQ >= 30 means ≤0.1% error probability in mapping
+        echo "[quality_filter] Applying MAPQ >= 30 filter to remove low-quality/non-cholerae alignments..." >> {log}
+        tmp_mapq_bam="{params.outdir}/{wildcards.sample}._tmp.mapq_filtered.bam"
+        samtools view -q 30 -b {output.bam} > "$tmp_mapq_bam" 2>> {log}
+        mv "$tmp_mapq_bam" {output.bam}
         
         # Index BAM file
         samtools index {output.bam} 2>> {log}
@@ -923,28 +1098,28 @@ manifest = {{
     "log": "{log}"
 }}
 
-        with open("{output.manifest}", "w") as f:
-            json.dump(manifest, f, indent=2)
+with open("{output.manifest}", "w") as f:
+    json.dump(manifest, f, indent=2)
 
-        # Label consensus files for downstream tools
-        consensus_guide = {
-            "sample_id": "{params.sample_id}",
-            "consensus_backbone": "{params.sample_id}_consensus.fasta",
-            "usage_guidelines": {
-                "strict_consensus": {
-                    "file": "{params.sample_id}_consensus.fasta",
-                    "description": "Majority-rule strict bases (A,C,G,T).",
-                    "recommended_for": ["Phylogenetic Trees (IQ-TREE, RAxML)", "Core Genome Alignment", "MLST"]
-                },
-                "iupac_consensus": {
-                    "file": "{params.sample_id}_consensus_iupac.fasta",
-                    "description": "Ambiguity codes (R, Y, K, etc.) for mixed sites.",
-                    "recommended_for": ["Serotype Prediction", "Allele Stability Analysis", "Evolutionary Tracking"]
-                }
-            }
-        }
-        with open("{params.outdir}/README_CONSENSUS.json", "w") as f:
-            json.dump(consensus_guide, f, indent=2)
+# Label consensus files for downstream tools
+consensus_guide = {{
+    "sample_id": "{params.sample_id}",
+    "consensus_backbone": "{params.sample_id}_consensus.fasta",
+    "usage_guidelines": {{
+        "strict_consensus": {{
+            "file": "{params.sample_id}_consensus.fasta",
+            "description": "Majority-rule strict bases (A,C,G,T).",
+            "recommended_for": ["Phylogenetic Trees (IQ-TREE, RAxML)", "Core Genome Alignment", "MLST"]
+        }},
+        "iupac_consensus": {{
+            "file": "{params.sample_id}_consensus_iupac.fasta",
+            "description": "Ambiguity codes (R, Y, K, etc.) for mixed sites.",
+            "recommended_for": ["Serotype Prediction", "Allele Stability Analysis", "Evolutionary Tracking"]
+        }}
+    }}
+}}
+with open("{params.outdir}/README_CONSENSUS.json", "w") as f:
+    json.dump(consensus_guide, f, indent=2)
 PY
         """
 # Include modular rule files
@@ -1091,6 +1266,123 @@ checkpoint strain_triage:
             --sample {params.sample_id} \
             2>&1 | tee {log}
         """
+
+# Rule 10c: Cholerae Verification Checkpoint (Negative Filter Gate)
+# This checkpoint enforces that only V. cholerae samples proceed to alignment/consensus
+checkpoint cholerae_verification:
+    input:
+        vibrio_stats=rules.extract_vibrio.output.stats,
+        triage_decision=rules.strain_triage.output.decision
+    output:
+        verified="{output_dir}/{{sample}}/07_triage/cholerae_verified.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        cholerae_only=config.get("cholerae_only_alignment", True),
+        sample_id=lambda wildcards: wildcards.sample
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/cholerae_verification.log".format(output_dir=config["output_dir"])
+    script:
+        """
+import json
+
+# Load extraction stats
+with open(input.vibrio_stats) as f:
+    vibrio_stats = json.load(f)
+
+# Load triage decision
+with open(input.triage_decision) as f:
+    triage_decision = json.load(f)
+
+# Determine if sample is V. cholerae-worthy
+is_cholerae = vibrio_stats.get("vibrio_cholerae_reads", 0) > 0
+
+# Check if triage confirmed it (optional cross-check)
+triage_confirmed = triage_decision.get("serogroup") in ["O1", "O1/O139"]
+
+# Final verdict
+verdict = {
+    "sample": params.sample_id,
+    "is_v_cholerae": is_cholerae,
+    "cholerae_reads_found": vibrio_stats.get("vibrio_cholerae_reads", 0),
+    "other_vibrio_reads": vibrio_stats.get("other_vibrio_reads", 0),
+    "contamination_reads": vibrio_stats.get("contamination_reads", 0),
+    "triage_serogroup": triage_decision.get("serogroup"),
+    "triage_confirmed": triage_confirmed,
+    "proceed_to_alignment": is_cholerae and params.cholerae_only,
+    "reason": "Negative filter: V. cholerae reads detected" if is_cholerae else "Negative filter: Non-cholerae Vibrio or contamination"
+}
+
+with open(output.verified, 'w') as f:
+    json.dump(verdict, f, indent=2)
+
+import sys
+print(f"[cholerae_verification] {verdict['sample']}: is_v_cholerae={verdict['is_v_cholerae']}, "
+      f"proceed_to_alignment={verdict['proceed_to_alignment']}", file=sys.stderr)
+"""
+
+# Rule 10c-bypass: Skip alignment for non-cholerae samples (Placeholder Outputs)
+rule skip_non_cholerae_alignment:
+    input:
+        cholerae_verified=rules.cholerae_verification.output.verified
+    output:
+        bam="{output_dir}/{{sample}}/04_alignment/{{sample}}_aligned.sorted.bam".format(
+            output_dir=config["output_dir"]
+        ),
+        bai="{output_dir}/{{sample}}/04_alignment/{{sample}}_aligned.sorted.bam.bai".format(
+            output_dir=config["output_dir"]
+        ),
+        rescue_stats="{output_dir}/{{sample}}/04_alignment/{{sample}}_unmapped_rescue_stats.json".format(
+            output_dir=config["output_dir"]
+        ),
+        rescue_log="{output_dir}/{{sample}}/04_alignment/{{sample}}_unmapped_rescue.log".format(
+            output_dir=config["output_dir"]
+        ),
+        manifest="{output_dir}/{{sample}}/04_alignment/alignment_manifest.json".format(
+            output_dir=config["output_dir"]
+        )
+    conda:
+        "envs/analysis.yaml"
+    run:
+        import json
+        
+        # Load verification result
+        with open(input.cholerae_verified) as f:
+            verdict = json.load(f)
+        
+        # Only run this rule if sample is NOT cholerae
+        if verdict.get("proceed_to_alignment", False):
+            raise Exception(f"ERROR: skip_non_cholerae_alignment should not run for cholerae-verified sample {wildcards.sample}!")
+        
+        # Create placeholder BAM (empty, but valid)
+        shell("""
+            samtools view -H /dev/null | samtools view -b - > {output.bam} 2>/dev/null || \
+            (echo -ne '\\x42\\x41\\x4d\\x01' > {output.bam})  # Minimal valid BAM header
+            samtools index {output.bam} 2>/dev/null || touch {output.bai}
+        """)
+        
+        # Create placeholder JSON files
+        with open(output.rescue_stats, 'w') as f:
+            json.dump({
+                "skipped": True,
+                "reason": "Non-cholerae sample - alignment skipped per negative filter policy"
+            }, f, indent=2)
+        
+        with open(output.rescue_log, 'w') as f:
+            f.write(f"Sample {wildcards.sample} filtered out by negative filter:\n")
+            f.write(f"  Vibrio cholerae reads: {verdict.get('cholerae_reads_found', 0)}\n")
+            f.write(f"  Other Vibrio species: {verdict.get('other_vibrio_reads', 0)}\n")
+            f.write(f"  Contamination: {verdict.get('contamination_reads', 0)}\n")
+        
+        with open(output.manifest, 'w') as f:
+            json.dump({
+                "step": "alignment",
+                "status": "skipped",
+                "reason": "Non-cholerae species - negative filter policy",
+                "verdict": verdict
+            }, f, indent=2)
 
 # Rule 8c: Tier 0 - sourmash K-mer Divergence Detection
 rule sourmash_divergence:

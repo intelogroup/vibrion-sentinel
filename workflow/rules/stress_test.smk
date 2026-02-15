@@ -79,7 +79,7 @@ except ImportError as e:
     sys.exit(1)
 
 sample_id = "{params.sample_id}"
-outdir = "{params.output_dir}}" + "/" + sample_id
+outdir = "{params.output_dir}" + "/" + sample_id
 
 # Initialize modules
 virulence_profiler = VirulenceProfiler()
