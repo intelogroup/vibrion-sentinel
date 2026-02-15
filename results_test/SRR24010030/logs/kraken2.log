@@ -1,5 +1,0 @@
-Running Kraken2 classification [Tier: FULL]...
-Loading database information... done.
-189126 sequences (52.27 Mbp) processed in 2.042s (5556.3 Kseq/m, 1535.64 Mbp/m).
-  188846 sequences classified (99.85%)
-  280 sequences unclassified (0.15%)

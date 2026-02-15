@@ -1,9 +1,0 @@
-{
-  "sample": "SRR24010030",
-  "sxt_ice_detected": true,
-  "inca_c_plasmid_detected": false,
-  "replicon_type": "SXT/R391_ICE_chromosome",
-  "transmission_dynamics": "moderate_conjugation",
-  "module": "AMRElementDiscriminator",
-  "version": "1.0"
-}

@@ -596,7 +596,7 @@ checkpoint global_reference_triage:
         min_evidence=500  # Hash count threshold (k=31, scaled=100)
     shell:
         """
-        python3 scripts/triage_reference.py --sample-sig {input.sig} --ref-dir {params.ref_dir} --output {output.match} --serogroup {input.serogroup} --min-evidence {params.min_evidence}
+        python3 workflow/scripts/triage_reference.py --sample-sig {input.sig} --ref-dir {params.ref_dir} --output {output.match} --serogroup {input.serogroup} --min-evidence {params.min_evidence}
         """
 
 # Rule 3h: Panel Mapping Discovery (LOW_EVIDENCE escalation)
@@ -1174,7 +1174,7 @@ rule forensic_confirmation:
         "{output_dir}/{{sample}}/logs/forensic_confirmation.log".format(output_dir=config["output_dir"])
     shell:
         """
-        python3 scripts/forensic_biotyping.py {input.consensus} --output {output.report} 2>&1 | tee {log}
+        python3 workflow/scripts/forensic_biotyping.py {input.consensus} --output {output.report} 2>&1 | tee {log}
         """
 
 
@@ -1261,7 +1261,7 @@ checkpoint strain_triage:
         "{output_dir}/{{sample}}/logs/strain_triage.log".format(output_dir=config["output_dir"])
     shell:
         """
-        python3 scripts/strain_triage_alert.py \
+        python3 workflow/scripts/strain_triage_alert.py \
             --serogroup {input.report} \
             --output {output.decision} \
             --sample {params.sample_id} \
@@ -1591,7 +1591,7 @@ rule predict_phenotype:
     shell:
         """
         mkdir -p {params.outdir}
-        python3 scripts/phenotypic_prediction.py \
+        python3 workflow/scripts/phenotypic_prediction.py \
             {input.vibrio_fastq} \
             --ref {input.reference} \
             --output {output.report} \
@@ -1615,7 +1615,7 @@ rule phage_sentinel:
     shell:
         """
         mkdir -p {params.outdir}
-        python3 scripts/phage_sentinel.py \
+        python3 workflow/scripts/phage_sentinel.py \
             --input {input.kraken_report} \
             --output {output.report} \
             2>&1 | tee {log}
@@ -1702,7 +1702,7 @@ rule detect_amr_rgi:
     threads: config["threads"]
     shell:
         """
-        python3 scripts/detect_amr_rgi.py \
+        python3 workflow/scripts/detect_amr_rgi.py \
             --consensus {input.consensus} \
             --output {output.report} \
             --threads {threads}

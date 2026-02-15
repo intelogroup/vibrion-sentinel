@@ -1,7 +1,0 @@
-📖 Generating consensus genome from: results_test/SRR24010030/04_alignment/SRR24010030_aligned.sorted.bam
-📋 Reference: data/references/2010EL-1786.fasta
-🎯 Parameters: min_depth=1X, min_quality=Q20
-  Processing contig CP003069.1 (3,031,375 bp)...
-  Processing contig CP003070.1 (1,046,365 bp)...
-✅ Generated Strict Consensus: results_test/SRR24010030/09_consensus/SRR24010030_consensus.fasta
-✅ Generated IUPAC Consensus: results_test/SRR24010030/09_consensus/SRR24010030_consensus_iupac.fasta
