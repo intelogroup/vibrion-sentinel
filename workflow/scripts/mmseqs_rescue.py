@@ -15,7 +15,8 @@ def run_mmseqs(input_fastq, db_path, output_prefix, threads, min_seq_id):
         "--threads", str(threads),
         "--min-seq-id", str(min_seq_id),
         "--tax-lineage", "1",
-        "--lca-mode", "3" # LCA mode 3 is robust
+        "--lca-mode", "3", # LCA mode 3 is robust
+        "--min-length", "10"
     ]
     
     print(f"Running command: {' '.join(cmd)}")

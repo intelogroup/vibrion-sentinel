@@ -1,0 +1,15 @@
+samples:
+  test_sample:
+    reads:
+      - "data/raw_reads/test_sample.fastq.gz"
+
+samples_dir: "data/raw_reads"
+output_dir: "results/test_run"
+
+# Reference databases
+hostile_index: "data/references/hostile"
+kraken_db: "data/kraken2_db/kraken2_vibrion"
+
+# Pipeline settings
+min_coverage: 10
+min_reads: 100

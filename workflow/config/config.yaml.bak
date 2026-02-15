@@ -32,27 +32,6 @@ novc_reference_strains:
   - RFB16   # Lake environmental isolate, USA
   - NOVC07  # Environmental isolate, Nanjing CDC
 
-# ============================================================================
-# Vibrio Species Filtering (Negative Filter Strategy)
-# ============================================================================
-# TaxID Reference:
-#  662 = Vibrio (Genus level - KEEP, needed for coverage)
-#  666 = Vibrio cholerae (Species - KEEP)
-# 1236 = Gammaproteobacteria (Broad - KEEP for rescue)
-# 127906 = Vibrio cholerae O1 biovar El Tor (Subspecies - KEEP)
-# 670 = Vibrio parahaemolyticus (OTHER - DISCARD)
-# 672 = Vibrio vulnificus (OTHER - DISCARD)
-# 1219 = Vibrio mimicus (OTHER - DISCARD)
-
-vibrio_taxid: "666"  # V. cholerae species-level
-vibrio_genus_taxid: "662"  # Vibrio genus (rescue conserved regions)
-cholerae_acceptable_taxids: ["666", "662", "1236", "127906"]  # Keep for alignment
-non_cholerae_vibrio_taxids: ["670", "672", "1219", "216", "217"]  # Discard (V. parahaemolyticus, vulnificus, mimicus, harveyi, etc.)
-
-# Negative filter behavior:
-cholerae_only_alignment: True  # If True, only V. cholerae reads proceed to alignment/consensus
-preserve_other_vibrio_fastq: True  # If True, write non-cholerae Vibrio to separate FASTQ for auditing
-
 # Tier 1: Kraken2 (Fast k-mer filter)
 kraken_db: data/kraken2_haiti_custom # Specialist: Haiti Vibrio + Decoys
 kraken_broad_db: data/kraken2_standard_8gb # Generalist: RefSeq Bacteria/Virus
