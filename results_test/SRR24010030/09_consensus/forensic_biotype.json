@@ -1,0 +1,45 @@
+{
+    "biotype": "El Tor",
+    "variant": "Altered El Tor (Mozambique-like)",
+    "confidence_score": 95,
+    "discordance": {
+        "is_discordant": true,
+        "type": "Altered El Tor Pattern",
+        "matrix": {
+            "ctxB": "Classical",
+            "rstR": "El Tor",
+            "tcpA": "El Tor"
+        }
+    },
+    "mixtures": {},
+    "markers": {
+        "ctxb": {
+            "genotype": "Genotype 1 (Classical)",
+            "allele": "Classical",
+            "aa_39": "H",
+            "aa_68": "?",
+            "ctxb_gene_present": true
+        },
+        "rstr": {
+            "allele": "El Tor",
+            "status": "EL_TOR_PHAGE_REPRESSOR"
+        },
+        "tcpA": {
+            "allele": "El Tor",
+            "status": "EL_TOR_PILI"
+        },
+        "hylA": {
+            "allele": "El Tor (Functional)",
+            "status": "HEMOLYSIN_ACTIVE"
+        },
+        "7pet_arch": {
+            "RS1_rstC": "ABSENT",
+            "VSP_I": "ABSENT",
+            "VSP_II": "ABSENT"
+        }
+    },
+    "scores": {
+        "Classical": 1.0,
+        "El Tor": 2.3
+    }
+}

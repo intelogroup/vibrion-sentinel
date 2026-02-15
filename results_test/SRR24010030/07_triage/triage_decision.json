@@ -1,0 +1,12 @@
+{
+  "sample_id": "SRR24010030",
+  "is_atypical": false,
+  "alert_level": "INFO",
+  "routing_mode": "STRICT_SURVEILLANCE",
+  "forensic_directives": [],
+  "message": "Sample confirmed as Unknown (Unknown). Matches standard surveillance profile.",
+  "serogroup": "Unknown",
+  "lineage": "Unknown",
+  "proceed_to_discovery": false,
+  "timestamp": null
+}

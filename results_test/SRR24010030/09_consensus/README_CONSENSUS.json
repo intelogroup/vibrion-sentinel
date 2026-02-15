@@ -1,0 +1,24 @@
+{
+  "sample_id": "SRR24010030",
+  "consensus_backbone": "SRR24010030_consensus.fasta",
+  "usage_guidelines": {
+    "strict_consensus": {
+      "file": "SRR24010030_consensus.fasta",
+      "description": "Majority-rule strict bases (A,C,G,T).",
+      "recommended_for": [
+        "Phylogenetic Trees (IQ-TREE, RAxML)",
+        "Core Genome Alignment",
+        "MLST"
+      ]
+    },
+    "iupac_consensus": {
+      "file": "SRR24010030_consensus_iupac.fasta",
+      "description": "Ambiguity codes (R, Y, K, etc.) for mixed sites.",
+      "recommended_for": [
+        "Serotype Prediction",
+        "Allele Stability Analysis",
+        "Evolutionary Tracking"
+      ]
+    }
+  }
+}

@@ -81,7 +81,7 @@ snpeff_db: Vibrio_cholerae_o1_str_2010el_1786 # Matches 2010EL-1786 reference
 # Consensus generation mode
 pipeline_mode: "LABORATORY_FULL" # or "FIELD_RAPID"
 # AI API Configuration (NVIDIA BioNeMo)
-nvidia_api_key: "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"
+nvidia_api_key: "nvapi-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 evo_api_url: "https://health.api.nvidia.com/v1/biology/arc/evo2-40b/generate"
 
 # Evolution Surveillance Benchmarks

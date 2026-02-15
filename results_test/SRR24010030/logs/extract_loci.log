@@ -1,0 +1,48 @@
+Extracting loci from reference: results_test/SRR24010030/09_consensus/SRR24010030_polished.fasta
+BED file: ../data/references/surveillance_loci.bed
+Fallback reference loci: ../data/references/reference_loci.fasta
+
+Extracting wbeT (CP003069.1:2678186-2678980)
+  ⚠️  Coordinates CP003069.1:2678186-2678980 failed. Attempting BLAST discovery...
+  Extracted 794 bp
+Extracting ctxB (CP003069.1:1041238-1041612)
+  ⚠️  Coordinates CP003069.1:1041238-1041612 failed. Attempting BLAST discovery...
+  Extracted 374 bp
+Extracting tcpA (CP003069.1:367950-368624)
+  ⚠️  Coordinates CP003069.1:367950-368624 failed. Attempting BLAST discovery...
+  Extracted 674 bp
+Extracting gyrA (CP003069.1:807201-809885)
+  ⚠️  Coordinates CP003069.1:807201-809885 failed. Attempting BLAST discovery...
+  Extracted 2684 bp
+Extracting parE (CP003069.1:2075752-2077632)
+  ⚠️  Coordinates CP003069.1:2075752-2077632 failed. Attempting BLAST discovery...
+  Extracted 1880 bp
+Extracting scrABC (CP003070.1:287590-291500)
+  ⚠️  Coordinates CP003070.1:287590-291500 failed. Attempting BLAST discovery...
+  Extracted 3910 bp
+Extracting lip (CP003069.1:1729940-1730713)
+  ⚠️  Coordinates CP003069.1:1729940-1730713 failed. Attempting BLAST discovery...
+  Extracted 773 bp
+Extracting rbm (CP003069.1:968400-973530)
+  ⚠️  Coordinates CP003069.1:968400-973530 failed. Attempting BLAST discovery...
+  Extracted 5130 bp
+Extracting katB (CP003069.1:1169961-1171472)
+  ⚠️  Coordinates CP003069.1:1169961-1171472 failed. Attempting BLAST discovery...
+  Extracted 1511 bp
+Extracting ahpC (CP003069.1:264163-264768)
+  ⚠️  Coordinates CP003069.1:264163-264768 failed. Attempting BLAST discovery...
+  Extracted 605 bp
+Extracting hapR (CP003069.1:1086835-1087515)
+  ⚠️  Coordinates CP003069.1:1086835-1087515 failed. Attempting BLAST discovery...
+  Extracted 680 bp
+Extracting pspC_VSP2 (CP003069.1:1282578-1282967)
+  ⚠️  Coordinates CP003069.1:1282578-1282967 failed. Attempting BLAST discovery...
+  Extracted 389 bp
+Extracting tssC_T6SS (CP003070.1:890225-891703)
+  ⚠️  Coordinates CP003070.1:890225-891703 failed. Attempting BLAST discovery...
+  Extracted 1478 bp
+Extracting rtxA_MARTX (CP003069.1:1027143-1040744)
+  ⚠️  Coordinates CP003069.1:1027143-1040744 failed. Attempting BLAST discovery...
+  Extracted 13601 bp
+
+Total loci extracted: 14

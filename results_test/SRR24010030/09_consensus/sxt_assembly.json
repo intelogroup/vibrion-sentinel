@@ -1,0 +1,7 @@
+{
+  "sample_id": "SRR24010030",
+  "status": "INSUFFICIENT_COVERAGE",
+  "method": "alignment_consensus",
+  "reason": "Only 0 reads mapped to SXT region",
+  "assembly": null
+}

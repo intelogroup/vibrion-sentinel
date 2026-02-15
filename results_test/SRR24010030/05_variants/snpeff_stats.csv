@@ -1,0 +1,123 @@
+
+# Summary table 
+
+Name , Value
+Genome , Vibrio_cholerae_o1_str_2010el_1786 
+Date , 2026-02-14 20:43
+SnpEff_version , SnpEff 5.4a (build 2025-11-25 12:22), by Pablo Cingolani
+Command_line_arguments , SnpEff  -stats results_test/SRR24010030/05_variants/snpeff_stats.html -csvStats results_test/SRR24010030/05_variants/snpeff_stats.csv Vibrio_cholerae_o1_str_2010el_1786 results_test/SRR24010030/05_variants/SRR24010030_variants.vcf.gz 
+Warnings , 0 
+Number_of_lines_in_input_file, 5
+Number_of_variants_before_filter, 5
+Number_of_not_variants , 0
+Number_of_variants_processed , 5
+Number_of_known_variants (i.e. non-empty ID) , 0, 0% 
+Number_of_effects , 5 
+Genome_total_length ,4077742 
+Genome_effective_length ,2 
+Change_rate , 0 
+
+# Change rate by chromosome
+
+Chromosome , Length , Changes , Change_rate 
+CP003069.1 , 1 , 0 , 0
+CP003070.1 , 1 , 0 , 0
+
+# Variantss by type
+
+Type , Count , Percent 
+DEL , 1 , 20% 
+INS , 2 , 40% 
+SNP , 2 , 40% 
+
+# Effects by impact
+
+Type , Count , Percent 
+
+# Effects by functional class
+
+Type , Count , Percent 
+
+Missense_Silent_ratio, 0
+
+# Count by effects
+
+Type , Count , Percent 
+
+# Count by genomic region
+
+Type , Count , Percent 
+
+# Quality 
+
+Values , 177,189,225
+Count , 1,1,3
+
+# InDel lengths
+
+Values , 0,1
+Count , 2,1
+
+# Base changes
+
+base  , A  , C  , G  , T 
+ A  , 0  , 0  , 0  , 0 
+ C  , 1  , 0  , 1  , 0 
+ G  , 0  , 0  , 0  , 0 
+ T  , 0  , 0  , 0  , 0 
+
+# Ts/Tv summary
+
+Transitions , 0
+Transversions , 2
+Ts_Tv_ratio , 0
+
+# Ts/Tv : All variants
+
+Sample ,results_test/SRR24010030/04_alignment/SRR24010030_aligned.sorted.bam,Total
+Transitions ,0,0
+Transversions ,2,2
+Ts/Tv ,0.000,0.000
+
+
+# Ts/Tv : Known variants
+
+No results available (empty input?)
+
+# Allele frequency
+
+# Allele frequency : All variants
+
+Values , 50
+Count , 5
+
+# Allele Count
+
+Values , 1
+Count , 5
+
+# Hom/Het table
+
+Sample_names , results_test/SRR24010030/04_alignment/SRR24010030_aligned.sorted.bam
+Reference , 0
+Het , 5
+Hom , 0
+Missing , 0
+
+
+# Codon change table
+	
+codons 
+
+# Amino acid change table
+
+aa 
+
+# Chromosome change table
+
+CP003069.1, Position,0,1
+CP003069.1,Count,0,0
+
+CP003070.1, Position,0,1
+CP003070.1,Count,0,0
+

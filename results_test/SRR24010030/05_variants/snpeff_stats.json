@@ -1,0 +1,10 @@
+{
+  "method": "snpeff",
+  "database": "Vibrio_cholerae_o1_str_2010el_1786",
+  "high_impact_count": 0,
+  "moderate_impact_count": 0,
+  "low_impact_count": 0,
+  "modifier_count": 5,
+  "high_impact_variants": [],
+  "moderate_impact_variants": []
+}

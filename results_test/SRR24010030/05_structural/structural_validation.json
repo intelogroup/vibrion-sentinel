@@ -1,0 +1,15 @@
+{
+  "sample": "SRR24010030",
+  "structural_variants": {
+    "wbeT_coverage": 5.49,
+    "wbeT_rescue_used": false,
+    "inaba_snp_detail": "Inaba (T at 2678724, quality GGGGGFGGGF)",
+    "CTX_coverage": 7.64,
+    "SXT_coverage": 5.27
+  },
+  "inaba_status": "Inaba (Confirmed SNP)",
+  "alerts": [
+    "Inaba Switch Variant Detected (Q121*): Inaba (T at 2678724, quality GGGGGFGGGF)"
+  ],
+  "toxigenic": true
+}

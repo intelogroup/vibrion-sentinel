@@ -1,0 +1,12 @@
+[sv_align] Running Supplementary Minimap2 Alignment (Short Read Mode)...
+[M::mm_idx_gen::0.053*0.97] collected minimizers
+[M::mm_idx_gen::0.061*1.31] sorted minimizers
+[M::main::0.061*1.31] loaded/built the index for 2 target sequence(s)
+[M::mm_mapopt_update::0.061*1.31] mid_occ = 1000
+[M::mm_idx_stat] kmer size: 21; skip: 11; is_hpc: 0; #seq: 2
+[M::mm_idx_stat::0.065*1.29] distinct minimizers: 666438 (99.15% are singletons); average occurrences: 1.020; average spacing: 5.997; total length: 4077740
+[M::worker_pipeline::1.335*1.26] mapped 94451 sequences
+[M::main] Version: 2.30-r1287
+[M::main] CMD: minimap2 -ax sr -t 4 data/references/2010EL-1786.fasta results_test/SRR24010030/03_vibrio/SRR24010030_vibrio_complete.fastq.gz
+[M::main] Real time: 1.338 sec; CPU: 1.687 sec; Peak RSS: 0.139 GB
+[bam_sort_core] merging from 0 files and 4 in-memory blocks...

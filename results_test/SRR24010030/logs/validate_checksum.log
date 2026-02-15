@@ -1,0 +1,12 @@
+🔍 Housekeeping Gene Checksum & Divergence Validation
+   VCF: results_test/SRR24010030/05_variants/SRR24010030_annotated.vcf.gz
+   Threshold: 1 SNPs per gene
+   Mode: STRICT (7PET)
+   Genes: recA, gyrB, dnaE
+
+📊 Results:
+   ✅ recA: 0 SNPs (threshold: 1)
+   ✅ gyrB: 0 SNPs (threshold: 1)
+   ✅ dnaE: 0 SNPs (threshold: 1)
+
+✅ Overall: PASS

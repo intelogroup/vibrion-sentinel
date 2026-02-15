@@ -1,0 +1,14 @@
+🌊 VIBRION PHAGE SENTINEL: Predation Monitoring (Coverage Depth Normalized)
+================================================================================
+  ⚠️  Coverage depth not provided. Using raw read counts (less accurate).
+
+  Vibrio Count: 188,712
+  Total Phage Count: 0
+  Vibrio Genome Size: 4.0 Mb
+  Phage Genome Size: 40 kb (typical)
+  Raw Phage/Vibrio Ratio (reads): 0.0000
+  Alert Threshold: 0.0500 (5.0%)
+
+  ✓ Phage levels within normal environmental range (0.00% coverage depth).
+
+Phage sentinel report saved to results_test/SRR24010030/02_phage/phage_report.json

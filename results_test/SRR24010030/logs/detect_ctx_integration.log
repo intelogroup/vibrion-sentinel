@@ -1,0 +1,17 @@
+🔬 CTXφ Dual-Site Integration Detection
+   BAM: results_test/SRR24010030/04_alignment/SRR24010030_aligned.sorted.bam
+   Min depth: 5x
+   Checking dif1_chr1...
+   Checking dif2_chr2...
+
+📊 Results:
+   Status: MULTIPLE_SITES_DETECTED
+   Total copy number: 2
+   ✅ dif1_chr1: DETECTED
+      Depth: 5.57x, Bridging reads: 100
+   ✅ dif2_chr2: DETECTED
+      Depth: 5.3x, Bridging reads: 101
+
+⚠️ CTX prophage detected at BOTH Chr1 and Chr2 dif sites. Atypical El Tor strain with potential for higher toxin production.
+
+📄 Report: results_test/SRR24010030/09_consensus/ctx_integration.json

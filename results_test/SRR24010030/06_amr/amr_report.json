@@ -1,0 +1,54 @@
+{
+  "amr_genes": {},
+  "amr_by_drug_class": {},
+  "virulence_factors": {
+    "ctxA": {
+      "class": "Cholera toxin subunit A",
+      "description": "ADP-ribosylation of Gs alpha",
+      "kmers": [
+        "CACGATAATGGTTTGTCTGC",
+        "CGCTTCTCGATGGTGTTGTT",
+        "TGACAAGTGATAATGATGGG",
+        "ATGGTAAAGATATACGTATG",
+        "GCAGTCAGGTGGTCTTATGC"
+      ],
+      "evidence": {
+        "total_kmer_hits": 3,
+        "unique_kmers_matched": 1,
+        "confidence": "MEDIUM"
+      }
+    },
+    "ctxB_Haiti": {
+      "class": "Cholera toxin subunit B (Haiti Variant)",
+      "description": "ctxB7 allele (Classical/Haiti-specific SNPs: H20N, T47I, I68L)",
+      "kmers": [
+        "ATACCAATTCTATTTCTACA",
+        "GACAGAGTGAGTACTTTGAC",
+        "GCAGTCAGGTGGTCTTATGC"
+      ],
+      "evidence": {
+        "total_kmer_hits": 6,
+        "unique_kmers_matched": 2,
+        "confidence": "HIGH"
+      }
+    }
+  },
+  "biofilm_markers": {},
+  "immune_evasion_markers": {},
+  "mait_activation_markers": {},
+  "threat_assessment": {
+    "threat_level": "LOW",
+    "threat_factors": [],
+    "lineage_match": null,
+    "gene_counts": {
+      "amr_genes": 0,
+      "virulence_genes": 2,
+      "biofilm_genes": 0,
+      "immune_evasion_genes": 0,
+      "mait_activation_genes": 0
+    },
+    "novc_virulence": {},
+    "immune_evasion_markers": {},
+    "mait_activation_markers": {}
+  }
+}
