@@ -75,6 +75,39 @@ def discover_region_via_blast(query_name, target_fasta):
         except Exception:
             return None
 
+def calculate_region_depth(bam_file: Path, region: dict) -> float:
+    """Calculate mean depth coverage for the SXT region."""
+    if region is None:
+        return 0.0
+    
+    try:
+        # samtools depth -r chrom:start-end bam_file
+        region_str = f"{region['chrom']}:{region['start']}-{region['end']}"
+        cmd = ["samtools", "depth", "-r", region_str, str(bam_file)]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        lines = result.stdout.strip().split('\n')
+        
+        total_depth = 0
+        # Parsing depth output: "chrom pos depth"
+        for line in lines:
+            if not line: continue
+            parts = line.split('\t')
+            if len(parts) >= 3:
+                depth = int(parts[2])
+                total_depth += depth
+        
+        # Calculate mean over the entire region length
+        region_len = region['end'] - region['start']
+        if region_len <= 0: return 0.0
+        
+        return total_depth / region_len
+        
+    except Exception as e:
+        print(f"⚠️ Failed to calculate depth: {e}", file=sys.stderr)
+        # Fallback to 0.0
+        return 0.0
+
 def check_ram_available(min_gb: int = 8) -> bool:
     """Check if sufficient RAM is available for SPAdes."""
     try:
@@ -297,6 +330,10 @@ def main():
         else:
             print("   ❌ Could not locate SXT element in reference.")
 
+    # Calculate SXT depth check
+    mean_depth = calculate_region_depth(Path(args.bam), sxt_region)
+    print(f"   📊 SXT Mean Depth: {mean_depth:.2f}x")
+
     # Check mode
     if args.mode == "FIELD_RAPID":
         print("   ⚡ FIELD_RAPID mode: Skipping SPAdes assembly")
@@ -309,7 +346,8 @@ def main():
             "status": "SKIPPED",
             "method": "alignment_consensus" if success else "none",
             "reason": "FIELD_RAPID mode - using reference-based consensus",
-            "assembly": None
+            "assembly": None,
+            "mean_depth": mean_depth
         }
         
         if not success:
@@ -321,7 +359,33 @@ def main():
         print(f"   ✅ Skipped ({'alignment-based consensus generated' if success else 'failed to generate consensus'})")
         return
     
+    # Check coverage depth (need at least 15x for reliable assembly)
+    MIN_COVERAGE = 15.0
+    if mean_depth < MIN_COVERAGE:
+        print(f"   ⚠️  Insufficient coverage ({mean_depth:.1f}x < {MIN_COVERAGE}x)")
+        print(f"   Falling back to reference-based consensus")
+        
+        success = extract_consensus_fallback(Path(args.bam), sxt_region, Path(args.contigs))
+        
+        report = {
+            "sample_id": args.sample or Path(args.bam).stem,
+            "status": "INSUFFICIENT_COVERAGE",
+            "method": "alignment_consensus" if success else "none",
+            "reason": f"Coverage {mean_depth:.1f}x below threshold ({MIN_COVERAGE}x)",
+            "assembly": None,
+            "mean_depth": mean_depth
+        }
+        
+        if not success:
+            Path(args.contigs).touch()
+        
+        with open(args.output, 'w') as f:
+            json.dump(report, f, indent=2)
+        
+        return
+    
     # Check RAM
+
     if not check_ram_available(min_gb=8):
         print("   ⚠️  Insufficient RAM for SPAdes (need 8GB)")
         print("   Falling back to reference-based consensus")
@@ -333,7 +397,8 @@ def main():
             "status": "SKIPPED",
             "method": "alignment_consensus" if success else "none",
             "reason": "Insufficient RAM for SPAdes assembly",
-            "assembly": None
+            "assembly": None,
+            "mean_depth": mean_depth
         }
         
         if not success:
@@ -358,7 +423,8 @@ def main():
             "status": "INSUFFICIENT_COVERAGE",
             "method": "alignment_consensus" if success else "none",
             "reason": f"Only {read_count} reads mapped to SXT region",
-            "assembly": None
+            "assembly": None,
+            "mean_depth": mean_depth
         }
         
         if not success:
@@ -385,7 +451,8 @@ def main():
             "status": "SUCCESS",
             "method": "assembly",
             "reads_extracted": read_count,
-            "assembly": analysis
+            "assembly": analysis,
+            "mean_depth": mean_depth
         }
         
         print(f"   📊 Contigs: {analysis['contig_count']}")
@@ -402,7 +469,8 @@ def main():
             "status": "FAILED",
             "method": "alignment_consensus" if success else "none",
             "reason": str(e),
-            "assembly": None
+            "assembly": None,
+            "mean_depth": mean_depth
         }
         
         if not success:
