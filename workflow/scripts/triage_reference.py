@@ -24,7 +24,8 @@ def main():
         "Malawi_2023.fasta.sig",
         "India_Wave3.fasta.sig",
         "O139_MO10.fasta.sig",
-        "O139_SG24.fasta.sig"
+        "O139_SG24.fasta.sig",
+        "Inaba_A487.fasta.sig"
     ]
 
     valid_sigs = []
@@ -108,7 +109,11 @@ def main():
             best_ref = max(results, key=results.get)
 
     # Construct the path
-    ref_path = f"data/references/{best_ref}.fasta"
+    # Special case: Inaba_A487 has no assembly, map to N16961 instead
+    if best_ref == "Inaba_A487":
+        ref_path = "data/references/N16961.fasta"
+    else:
+        ref_path = f"data/references/{best_ref}.fasta"
     
     output_data = {
         "best_reference": ref_path,
