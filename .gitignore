@@ -18,10 +18,30 @@ data/kraken2_db/*
 data/mmseqs_db/*
 !data/mmseqs_db/.gitkeep
 
-# Reference Databases (Too large for git)
+# Global references — too large for git, downloaded by setup_databases.sh
 data/global_references/*
 !data/global_references/.gitkeep
+
+# Kraken2 databases — downloaded by setup_databases.sh
+data/kraken2_standard_8gb/*
+!data/kraken2_standard_8gb/.gitkeep
+data/kraken2_serogroup/*
+!data/kraken2_serogroup/.gitkeep
+data/kraken2_haiti_custom/*
+!data/kraken2_haiti_custom/.gitkeep
+
+# MMseqs2 — downloaded by setup_databases.sh
+data/mmseqs_db/*
+!data/mmseqs_db/.gitkeep
 
 # IDEs
 .vscode/
 .DS_Store
+
+# Backend Data/Models (Large files)
+backend/data/
+backend/models/
+backend/__pycache__/
+backend/.venv/
+backend/.env
+backend/.env.local
