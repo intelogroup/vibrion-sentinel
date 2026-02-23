@@ -1,14 +1,25 @@
-# Haiti Real API Configuration
+# Bangladesh O139 Analysis Config
+# Sample: ERR018121 (O139 from Bangladesh, 2002)
+# Run: snakemake --configfile workflow/bangladesh_o139_config.yaml
+
+# Input/Output Paths
 samples_dir: "data/raw_reads"
-output_dir: "data/pipeline_output"
+output_dir: "results/bangladesh_o139"
 reference_dir: "data/references"
+
+# Resources
 kraken_db: "data/kraken2_standard_8gb"
 hostile_index: "human-t2t-hla-argos985"
 vibrio_taxid: 662
+
+# API
 nvidia_api_key: ""  # Set via: --config nvidia_api_key=$NVIDIA_API_KEY
 evo2_url: "https://health.api.nvidia.com/v1/biology/arc/evo2-40b/generate"
-mongodb_url: "mongodb+srv://jimkalinov_db_user:vhHRL3y1w9LTJFZm@vibrionsentinelcluster.ll6hjn5.mongodb.net/vibrion_db?retryWrites=true&w=majority&appName=vibrionSentinelCluster"
+
+# Analysis
 threads: 4
 memory_mb: 8000
+
+# Samples
 samples:
-  - SRR22265446_1
+  - ERR018121

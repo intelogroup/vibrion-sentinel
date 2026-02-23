@@ -1,0 +1,51 @@
+# Quick Validation Run - Single Sample
+samples_dir: "data/raw_reads"
+output_dir: "data/pipeline_output/quick_validation"
+reference_dir: "data/references"
+global_references_dir: "data/global_references"
+reference_library_dir: "data/reference_library"
+
+# Use Haiti custom database for fast processing
+kraken_db: "data/kraken2_haiti_custom"
+kraken_broad_db: "data/kraken2_standard_8gb"
+serogroup_db: "data/kraken2_serogroup"
+mmseqs_db: "data/mmseqs_db/swissprot"
+
+# Single fast test sample - Haiti 2022 resurgence
+samples: ["Haiti_Resurgence_2022"]
+
+# Triage settings
+triage:
+  model_cache_dir: "data/models/triage"
+  sourmash_ksize: 31
+  sourmash_scaled: 1000
+  sourmash_threshold: 0.999
+  device: "mps"
+
+# Configuration for speed
+aligner_type: "bwa"
+hostile_index: "human-t2t-hla-argos985"
+vibrio_taxid: 662
+threads: 4
+memory_mb: 8000
+pipeline_mode: "FIELD_RAPID"  # Fast mode for quick validation
+
+# AI API
+nvidia_api_key: ""  # Set via: --config nvidia_api_key=$NVIDIA_API_KEY
+evo_api_url: "https://health.api.nvidia.com/v1/biology/arc/evo2-40b/generate"
+
+# Variant thresholds
+variant_thresholds:
+  clonal_af: 0.9
+  minor_af: 0.1
+  hetero_min_depth: 20
+  iupac_min_af: 0.2
+
+# Enable NOVC
+novc_references_enabled: True
+novc_reference_dir: data/reference_library/novc_environmental
+
+# Evolution Surveillance
+evo2:
+  sentinel_ref: "data/references/2010EL-1786.fasta"
+  outbreak_ref: "data/references/Haiti_2022_Resurgence.fasta"
