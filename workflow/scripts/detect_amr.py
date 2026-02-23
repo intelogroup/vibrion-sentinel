@@ -53,15 +53,32 @@ AMR_GENE_SIGNATURES = {
         'mechanism': 'Aminoglycoside phosphotransferase',
         'kmers': ['ATGAGTACATTAAACGATGC', 'CGCGTTGGATTACGACGATG']
     },
-    'qnrA': {
-        'class': 'Fluoroquinolone resistance',
-        'mechanism': 'DNA gyrase protection',
-        'kmers': ['ATGGAAACCTACAATCATAC', 'CGCGATGTGCCGTAAACGGT']
+    'qnrVC': {
+        'class': 'Fluoroquinolone resistance (IncA/C-associated)',
+        'mechanism': 'Quinolone resistance protein, plasmid-encoded (IncC)',
+        'kmers': [
+            'ATGACGCAAATTATTGTTAG',
+            'CGCGATACACACGGTCTGAA',
+            'TTAAGCGCGAATTTACATCA'
+        ]
     },
-    'qnrS': {
-        'class': 'Fluoroquinolone resistance',
-        'mechanism': 'DNA gyrase protection',
-        'kmers': ['ATGAGCAATTCAACGCGCAC', 'CGCGATCAGATCGGTCTGCT']
+    'blaPER-7': {
+        'class': 'Extended-Spectrum Beta-Lactamase (Global 7PET Resistance Marker)',
+        'mechanism': 'ESBL for 3rd generation cephalosporin resistance, IncC plasmid',
+        'kmers': [
+            'ATGAGTATTGAGAAGATGAC',
+            'CGCATTGCACGCCACGGGAC',
+            'TTAACGCGACGCGCGCAGCG'
+        ]
+    },
+    'aac(6\')-Ib-cr': {
+        'class': 'Aminoglycoside Acetyltransferase (IncA/C-associated)',
+        'mechanism': 'Aminoglycoside resistance + reduced fluoroquinolone susceptibility, plasmid-encoded',
+        'kmers': [
+            'ATGAAGATCATTGCGACTAA',
+            'CGCATTCGTCAGCATGTTCG',
+            'TTACGCGCGATGTGCCGACG'
+        ]
     },
     'cipro_reduced_susceptibility': {
         'class': 'Fluoroquinolone (Reduced Susceptibility)',
@@ -282,6 +299,81 @@ MAIT_ACTIVATION_SIGNATURES = {
     }
 }
 
+# Motility & Chemotaxis Gene Signatures (Hyperinfectivity State Classification)
+MOTILITY_GENE_SIGNATURES = {
+    'flaA': {
+        'class': 'Flagellar filament',
+        'description': 'Major flagellin subunit - motility structural gene',
+        'kmers': ['ATGGCTAGCATCAACAACAC', 'CGCATTGCTCAGCTTAGCGA']
+    },
+    'motA': {
+        'class': 'Flagellar motor stator',
+        'description': 'Proton-driven motor component A',
+        'kmers': ['ATGAGCAATATCAAAGACGC', 'CGCGATGTTCAGCAATGTCG']
+    },
+    'motB': {
+        'class': 'Flagellar motor stator',
+        'description': 'Proton-driven motor component B',
+        'kmers': ['ATGAATAAACTTCTGCTGCA', 'CGCAGTCAGCTTGATCAACG']
+    },
+    'motV': {
+        'class': 'Flagellar motor accessory',
+        'description': 'Na+-driven motor component - loss creates straight-swimming hyperinfectious phenotype',
+        'kmers': ['ATGCGTAACCTGATTGACGA', 'CGCATCAGTTGCAGTGATCG']
+    },
+    'cheA': {
+        'class': 'Chemotaxis histidine kinase',
+        'description': 'Central signal transduction relay for chemotaxis',
+        'kmers': ['ATGACGCCAATTCAGCAAGA', 'CGCGATCACTGCAGTACGTC']
+    },
+    'cheY': {
+        'class': 'Chemotaxis response regulator',
+        'description': 'Flagellar switch controller - CW/CCW rotation',
+        'kmers': ['ATGCGCATTCTGATCGATGA', 'CGCACTGATCACGATCAGCG']
+    }
+}
+
+
+def classify_transmission_state(motility_genes, biofilm_genes, hapR_detected=False):
+    """
+    Classify *V. cholerae* transmission state based on motility/chemotaxis/biofilm markers.
+    
+    States:
+      HYPER_TRANSMITTER   — Motile but non-chemotactic (straight swimming, e.g. motV loss)
+      SEEKING_PLANKTONIC  — Motile + chemotactic (normal planktonic, environmental sampling)
+      BIOFILM_RESERVOIR   — VPS+/hapR absent (rugose, environmental persistence)
+      UNKNOWN             — Insufficient markers
+    """
+    has_flagella = 'flaA' in motility_genes or 'motA' in motility_genes
+    has_chemotaxis = 'cheA' in motility_genes and 'cheY' in motility_genes
+    has_biofilm = len(biofilm_genes) > 0
+    
+    if has_flagella and not has_chemotaxis:
+        return {
+            "state": "HYPER_TRANSMITTER",
+            "description": "Motile but non-chemotactic. Straight-swimming phenotype = hyperinfectious.",
+            "threat_escalation": 1
+        }
+    elif has_flagella and has_chemotaxis:
+        return {
+            "state": "SEEKING_PLANKTONIC",
+            "description": "Normal motile + chemotactic. Standard planktonic state.",
+            "threat_escalation": 0
+        }
+    elif has_biofilm and not hapR_detected:
+        return {
+            "state": "BIOFILM_RESERVOIR",
+            "description": "VPS+ biofilm with hapR absent. Environmental reservoir phenotype.",
+            "threat_escalation": 0
+        }
+    else:
+        return {
+            "state": "UNKNOWN",
+            "description": "Insufficient motility/biofilm markers for state classification.",
+            "threat_escalation": 0
+        }
+
+
 # Lineage Database Path
 LINEAGE_DB_PATH = Path(__file__).parent.parent.parent / "data/metadata/lineage_database.json"
 
@@ -381,7 +473,7 @@ def categorize_amr_profile(amr_genes):
     return dict(drug_classes)
 
 
-def assess_threat_level(amr_genes, virulence_genes, biofilm_genes, novc_virulence_genes=None, immune_evasion_genes=None, mait_activation_genes=None):
+def assess_threat_level(amr_genes, virulence_genes, biofilm_genes, novc_virulence_genes=None, immune_evasion_genes=None, mait_activation_genes=None, motility_genes=None):
     """
     Assess overall threat level based on detected genes
     """
@@ -391,6 +483,8 @@ def assess_threat_level(amr_genes, virulence_genes, biofilm_genes, novc_virulenc
         immune_evasion_genes = {}
     if mait_activation_genes is None:
         mait_activation_genes = {}
+    if motility_genes is None:
+        motility_genes = {}
     
     # Count genes by category
     n_amr = len(amr_genes)
@@ -398,6 +492,11 @@ def assess_threat_level(amr_genes, virulence_genes, biofilm_genes, novc_virulenc
     n_biofilm = len(biofilm_genes)
     n_immune_evasion = len(immune_evasion_genes)
     n_mait_activation = len(mait_activation_genes)
+    n_motility = len(motility_genes)
+    
+    # Transmission State Classification
+    hapR_detected = 'hapR' in biofilm_genes
+    transmission_state = classify_transmission_state(motility_genes, biofilm_genes, hapR_detected)
     
     # Lineage Triage
     lineage_matches = match_lineage(amr_genes)
@@ -485,16 +584,27 @@ def assess_threat_level(amr_genes, virulence_genes, biofilm_genes, novc_virulenc
         threat_factors.append(f'Multi-drug resistance ({n_amr} resistance genes)')
         threat_level = 'HIGH'
     
+    # Escalate threat for HYPER_TRANSMITTER state
+    escalation = transmission_state.get('threat_escalation', 0)
+    if escalation > 0:
+        threat_factors.append(f'Hyperinfectious state: {transmission_state["state"]} ({transmission_state["description"]})')
+        threat_levels = ['LOW', 'MODERATE', 'HIGH', 'CRITICAL']
+        current_idx = threat_levels.index(threat_level)
+        new_idx = min(current_idx + escalation, len(threat_levels) - 1)
+        threat_level = threat_levels[new_idx]
+    
     return {
         "threat_level": threat_level,
         "threat_factors": threat_factors,
         "lineage_match": best_match,
+        "transmission_state": transmission_state,
         "gene_counts": {
             "amr_genes": n_amr,
             "virulence_genes": n_virulence,
             "biofilm_genes": n_biofilm,
             "immune_evasion_genes": n_immune_evasion,
-            "mait_activation_genes": n_mait_activation
+            "mait_activation_genes": n_mait_activation,
+            "motility_genes": n_motility
         },
         "novc_virulence": novc_virulence_genes,
         "immune_evasion_markers": immune_evasion_genes,
@@ -550,11 +660,15 @@ def main(snakemake_obj=None):
     print("   Scanning for MAIT activation markers (riboflavin biosynthesis)...")
     mait_activation_genes = detect_genes_by_kmer(fastq_path, MAIT_ACTIVATION_SIGNATURES, min_kmer_hits=2)
     
+    # Detect motility/chemotaxis markers (Hyperinfectivity)
+    print("   Scanning for motility & chemotaxis markers...")
+    motility_genes = detect_genes_by_kmer(fastq_path, MOTILITY_GENE_SIGNATURES, min_kmer_hits=2)
+    
     # Categorize AMR profile
     amr_by_class = categorize_amr_profile(amr_genes)
     
     # Assess threat level
-    threat_assessment = assess_threat_level(amr_genes, virulence_genes, biofilm_genes, novc_virulence_genes, immune_evasion_genes, mait_activation_genes)
+    threat_assessment = assess_threat_level(amr_genes, virulence_genes, biofilm_genes, novc_virulence_genes, immune_evasion_genes, mait_activation_genes, motility_genes)
     
     # Step 3: Check for specific outbreak signatures (Lineage Triage)
     yemen_markers = ['mph(E)', 'msr(E)', 'ICEVchInd1']
