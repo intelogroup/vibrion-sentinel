@@ -1,10 +1,17 @@
-# Evaluation Configuration - Yemen 2017 Sample
+# Haiti Resurgence Test - SRR22283996 (Paired End)
+# Run from project root: snakemake --configfile workflow/haiti_resurgence_paired.yaml --use-conda --cores 4
+
+# Input/Output Paths (relative to project root)
 samples_dir: "data/raw_reads"
 output_dir: "data/pipeline_output"
 reference_dir: "data/references"
 
 # Kraken2 Database
 kraken_db: "data/kraken2_standard_8gb"
+
+# MMseqs2 Database (for rescue)
+mmseqs_db: "data/mmseqs_db/swissprot"
+mmseqs_min_seq_id: 0.8
 
 # Hostile Configuration
 hostile_index: "human-t2t-hla-argos985"
@@ -16,16 +23,12 @@ vibrio_taxid: 662
 nvidia_api_key: ""  # Set via: --config nvidia_api_key=$NVIDIA_API_KEY
 evo2_url: "https://health.api.nvidia.com/v1/biology/arc/evo2-40b/generate"
 
-# MongoDB & Supabase (Mocked/Env vars)
-mongodb_url: "${MONGODB_URL}"
-supabase_url: "${SUPABASE_URL}"
-supabase_key: "${SUPABASE_KEY}"
-
 # Analysis Parameters
 threads: 4
 memory_mb: 8000
-mapping_rescue_enabled: False
+aligner_type: "bwa"
+mapping_rescue_enabled: True
 
-# Sample to Evaluate
+# Samples to process
 samples:
-  - SRR8364307_Yemen_2017
+  - SRR22283996

@@ -1,10 +1,10 @@
-# Bangladesh 2023 Analysis Config
-# Sample: SRR31650318 (Clinical O1 from Dhaka, March 2023)
-# Run: snakemake --configfile workflow/bangladesh_2023_config.yaml
+# Bangladesh O139 Analysis Config
+# Sample: ERR018121 (O139 from Bangladesh, 2002)
+# Run: snakemake --configfile workflow/bangladesh_o139_config.yaml
 
 # Input/Output Paths
 samples_dir: "data/raw_reads"
-output_dir: "results/bangladesh_2023"
+output_dir: "results/bangladesh_o139"
 reference_dir: "data/references"
 
 # Resources
@@ -22,4 +22,4 @@ memory_mb: 8000
 
 # Samples
 samples:
-  - SRR31650318
+  - ERR018121

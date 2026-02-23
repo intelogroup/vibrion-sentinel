@@ -13,7 +13,7 @@ hostile_index: "human-t2t-hla-argos985"
 vibrio_taxid: 662
 
 # API
-nvidia_api_key: "nvapi-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+nvidia_api_key: ""  # Set via: --config nvidia_api_key=$NVIDIA_API_KEY
 evo2_url: "https://health.api.nvidia.com/v1/biology/arc/evo2-40b/generate"
 
 # Analysis

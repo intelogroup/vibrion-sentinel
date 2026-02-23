@@ -47,7 +47,7 @@ snpeff_db: "Vibrio_cholerae_o1_str_2010el_1786"
 pipeline_mode: "LABORATORY_FULL"
 
 # API Configuration
-nvidia_api_key: "nvapi-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+nvidia_api_key: ""  # Set via: --config nvidia_api_key=$NVIDIA_API_KEY
 evo_api_url: "https://health.api.nvidia.com/v1/biology/arc/evo2-40b/generate"
 
 # Evolution Surveillance
@@ -148,10 +148,6 @@ memory_management:
 # General Settings
 hostile_index: "human-t2t-hla-argos985"
 vibrio_taxid: 662
-threads: 4
-memory_mb: 8000
-samples:
-  ["DRR296286"]  # Small 6GB paired-end sample
 
 # MongoDB
 mongodb_url: "${MONGODB_URL}"
@@ -160,10 +156,10 @@ mongodb_url: "${MONGODB_URL}"
 supabase_url: "${SUPABASE_URL}"
 supabase_key: "${SUPABASE_KEY}"
 
-# Analysis Parameters
+# Resources — increase threads/memory_mb for full WGS samples
 threads: 4
 memory_mb: 8000
 
 # Single test sample
 samples:
-  - SRR22265437
+  - DRR296286

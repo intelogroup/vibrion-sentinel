@@ -6,6 +6,7 @@ CDC-compliant cholera surveillance for Haiti
 import os
 import json
 import sys
+import csv
 
 configfile: "workflow/config/config.yaml"
 
@@ -30,7 +31,7 @@ def get_adaptive_threads(wildcards=None):
     mm = get_memory_manager()
     if mm:
         tier_config = mm.get_config_for_tier()
-        return tier_config.get('threads', config.get('threads', 4))
+        return tier_config.get('max_threads', config.get('threads', 4))
     return config.get('threads', 4)
 
 def get_adaptive_kraken_db(wildcards=None):
@@ -86,15 +87,35 @@ def log_memory_status(sample_id: str):
         summary['sample'] = sample_id
         mm.write_memory_profile(sample_id)
 
+# Cache to suppress duplicate reference selection warnings (prevents 23x repetition per sample)
+_reference_selection_cache = {}
+
+def get_bwa_index(wildcards):
+    """Return BWA index files for the selected reference."""
+    ref = select_reference(wildcards)
+    return {
+        "bwt": f"{ref}.bwt",
+        "pac": f"{ref}.pac",
+        "ann": f"{ref}.ann",
+        "amb": f"{ref}.amb",
+        "sa": f"{ref}.sa"
+    }
+
 def select_reference(wildcards):
     """
     Reference Switchboard (Haiti-focused): Prioritizes Haiti references, then global search.
-    Hierarchy: Haiti 2010/2022 (≥0.99) → O139 → Global best match (≥0.98) → Haiti 2010 fallback
+    Hierarchy: Haiti 2010/2022 (≥0.30) → O139 → Global best match (≥0.25) → Haiti 2010 fallback
+    Note: Thresholds are for containment metric, not Jaccard similarity.
     """
     # Force triage and regional selection to run first
     checkpoints.strain_triage.get(**wildcards)
     checkpoints.global_reference_triage.get(**wildcards)
-    
+
+    # Check cache to suppress duplicate logging (prevents 23x repetition per sample)
+    sample_id = wildcards.sample
+    if sample_id in _reference_selection_cache:
+        return _reference_selection_cache[sample_id]
+
     output_dir = config.get("output_dir", "data/pipeline_output")
     match_path = f"{output_dir}/{wildcards.sample}/07_triage/regional_selection.json"
     
@@ -107,24 +128,43 @@ def select_reference(wildcards):
             discovery_ref_path = f"{output_dir}/{wildcards.sample}/07_triage/discovery_selected_reference.fasta"
             if os.path.exists(discovery_ref_path):
                 print(f"🔍 [select_reference] Sample {wildcards.sample} → LOW_EVIDENCE mode, using panel-mapped reference")
+                _reference_selection_cache[sample_id] = discovery_ref_path
                 return discovery_ref_path
         
         all_sims = match_data.get("all_similarities", {})
-        haiti_threshold = 0.5  # High confidence for Haiti assignment (containment)
-        global_threshold = 0.4  # Minimum for non-Haiti references (containment)
+        haiti_threshold = 0.30  # High confidence for Haiti assignment (containment)
+        global_threshold = 0.25  # Minimum for non-Haiti references (containment)
         
-        # Priority 1: Check Haiti references first (2010 or 2022)
+    # Priority 0: Trust the specific best match if it is highly confident and specific
+        best_ref = match_data.get("best_reference", "")
+        best_match_name = match_data.get("best_match", "")
+        best_sim = match_data.get("containment_score", match_data.get("similarity", 0))
+
+        # Check if we have a specific outbreak match (South Africa, DRC, Malawi) that beats Haiti
+        # 7PET strains are all similar, so we look for the *highest* score
         haiti_2010_sim = all_sims.get("2010EL-1786", 0)
         haiti_2022_sim = all_sims.get("Haiti_2022_Resurgence", 0)
+        max_haiti = max(haiti_2010_sim, haiti_2022_sim)
+
+        # If the best match is NOT Haiti, and it scores higher than Haiti (with a small margin), trust it.
+        # This allows South Africa (AFR15) to win over Haiti (LATAM-2)
+        if best_match_name not in ["2010EL-1786", "Haiti_2022_Resurgence"] and best_sim > (max_haiti + 0.005):
+             print(f"🌍 [select_reference] Sample {wildcards.sample} → {best_match_name} (Score: {best_sim:.3f} > Haiti: {max_haiti:.3f})")
+             _reference_selection_cache[sample_id] = best_ref
+             return best_ref
+
+        # Priority 1: Check Haiti references first (2010 or 2022)
+        haiti_threshold = 0.30  # High confidence for Haiti assignment (containment)
         
-        if haiti_2010_sim >= haiti_threshold or haiti_2022_sim >= haiti_threshold:
-            # Use the better Haiti reference
+        # Use the better Haiti reference
+        if max_haiti >= haiti_threshold:
             if haiti_2022_sim >= haiti_2010_sim:
                 ref = "data/references/Haiti_2022_Resurgence.fasta"
-                print(f"🇭🇹 [select_reference] Sample {wildcards.sample} → Haiti 2022 (similarity: {haiti_2022_sim:.3f})")
+                print(f"🇭🇹 [select_reference] Sample {wildcards.sample} → Haiti 2022 (containment: {haiti_2022_sim:.3f})")
             else:
                 ref = "data/references/2010EL-1786.fasta"
-                print(f"🇭🇹 [select_reference] Sample {wildcards.sample} → Haiti 2010 (similarity: {haiti_2010_sim:.3f})")
+                print(f"🇭🇹 [select_reference] Sample {wildcards.sample} → Haiti 2010 (containment: {haiti_2010_sim:.3f})")
+            _reference_selection_cache[sample_id] = ref
             return ref
         
         # Priority 2: Check for O139/non-O1 pathogens
@@ -141,28 +181,116 @@ def select_reference(wildcards):
                 if "O139" in best_ref or serogroup == "Non-O1":
                     if "O139" in best_ref:
                         print(f"🦠 [select_reference] Sample {wildcards.sample} → {best_ref} (O139 reference from regional selection)")
+                        _reference_selection_cache[sample_id] = best_ref
                         return best_ref
                     # For Non-O1 without specific O139 match, try the cluster reference
                     o139_ref = "data/serogroup_reference/clusters/LC594838.1_O139.fasta"
                     if os.path.exists(o139_ref):
                         print(f"🦠 [select_reference] Sample {wildcards.sample} → O139 cluster reference (Non-O1 default)")
+                        _reference_selection_cache[sample_id] = o139_ref
                         return o139_ref
         
         # Priority 3: Use global best match if high confidence (likely imported strain)
         best_ref = match_data.get("best_reference", "")
         best_sim = match_data.get("similarity", 0)
-        
+
         if best_sim >= global_threshold:
-            print(f"🌍 [select_reference] Sample {wildcards.sample} → {best_ref} (global match: {best_sim:.3f}, likely imported strain)")
+            print(f"🌍 [select_reference] Sample {wildcards.sample} → {best_ref} (global match containment: {best_sim:.3f}, likely imported strain)")
+            _reference_selection_cache[sample_id] = best_ref
             return best_ref
-        
-        # Priority 4: Low confidence - default to Haiti 2010 baseline
-        print(f"⚠️ [select_reference] Sample {wildcards.sample} low similarity ({best_sim:.3f}) → defaulting to Haiti 2010 baseline")
-        return "data/references/2010EL-1786.fasta"
-    
+
+        # Optional fuzzy preference: allow regionally-preferred references to win when
+        # they are close in similarity to the top hit AND there is panel-mapping evidence.
+        fuzzy = config.get("fuzzy_preferences", {})
+        if fuzzy.get("enabled", False):
+            tol = float(fuzzy.get("tolerance", 0.05))
+            map_threshold = float(fuzzy.get("mapping_rate_threshold", 0.05))
+            metadata_csv = fuzzy.get("metadata_csv", "malawi_sample_mapping.csv")
+            preferred_by_country = fuzzy.get("preferred_by_country", {})
+            candidate_ref = None
+            sample_country = None
+
+            # Try to read a metadata CSV (if provided) to find sample country
+            if os.path.exists(metadata_csv):
+                try:
+                    with open(metadata_csv) as mf:
+                        reader = csv.DictReader(mf)
+                        for row in reader:
+                            # heuristics: look for accession/run/sample fields and country-like fields
+                            accession_fields = [k for k in row.keys() if 'accession' in k.lower() or 'run' in k.lower() or 'sample' in k.lower()]
+                            country_fields = [k for k in row.keys() if 'country' in k.lower() or 'geo' in k.lower()]
+                            if accession_fields:
+                                if row[accession_fields[0]] == sample_id:
+                                    if country_fields:
+                                        sample_country = row[country_fields[0]]
+                                    else:
+                                        # fallback: search for a country-like value in the row
+                                        for v in row.values():
+                                            if isinstance(v, str) and any(x in v.lower() for x in ['malawi','haiti','kenya','drc','dr congo','congo']):
+                                                sample_country = v
+                                                break
+                                    break
+                except Exception:
+                    sample_country = None
+
+            # Map sample country to a preferred reference (config-driven)
+            if sample_country:
+                for country_key, ref_path in preferred_by_country.items():
+                    if country_key.lower() in sample_country.lower():
+                        candidate_ref = ref_path
+                        break
+
+            # If we have a candidate reference, check the similarity proximity and mapping evidence
+            if candidate_ref:
+                cand_basename = os.path.splitext(os.path.basename(candidate_ref))[0]
+                cand_sim = all_sims.get(cand_basename, 0)
+                if abs(best_sim - cand_sim) <= tol:
+                    panel_report = f"{output_dir}/{wildcards.sample}/07_triage/panel_mapping_report.json"
+                    if os.path.exists(panel_report):
+                        try:
+                            with open(panel_report) as pf:
+                                pr = json.load(pf)
+                            mapping_rate = float(pr.get("mapping_rate", pr.get("mapping_rate", 0)))
+                            selected_ref_name = pr.get("selected_ref", "")
+                            selected_basename = os.path.splitext(os.path.basename(selected_ref_name))[0]
+                            if mapping_rate >= map_threshold and (selected_basename == cand_basename or cand_basename in selected_ref_name):
+                                print(f"🔁 [select_reference] Sample {sample_id} → Preferring regional candidate {cand_basename} (sim gap {best_sim-cand_sim:.3f} <= {tol}, map_rate={mapping_rate:.3f})")
+                                _reference_selection_cache[sample_id] = candidate_ref
+                                return candidate_ref
+                        except Exception:
+                            pass
+
+        # Priority 4: Low confidence - default to region-specific baseline
+        deployment_region = config.get("deployment_region", "haiti")
+        default_refs = config.get("default_references", {})
+        fallback_ref = default_refs.get(deployment_region, "data/references/2010EL-1786.fasta")
+
+        print(f"⚠️ [select_reference] Sample {wildcards.sample} low containment ({best_sim:.3f}) → defaulting to {deployment_region} baseline: {fallback_ref}")
+        _reference_selection_cache[sample_id] = fallback_ref
+        return fallback_ref
+
     # Fallback if triage file missing
-    print(f"⚠️ [select_reference] No triage data for {wildcards.sample}. Defaulting to Haiti 2010.")
-    return "data/references/2010EL-1786.fasta"
+    deployment_region = config.get("deployment_region", "haiti")
+    default_refs = config.get("default_references", {})
+    fallback_ref = default_refs.get(deployment_region, "data/references/2010EL-1786.fasta")
+
+    print(f"⚠️ [select_reference] No triage data for {wildcards.sample}. Defaulting to {deployment_region} baseline.")
+    _reference_selection_cache[sample_id] = fallback_ref
+    return fallback_ref
+
+def get_surveillance_bed(wildcards):
+    """
+    Selects the correct surveillance loci BED file based on the selected reference.
+    Defaults to Haiti 2010 BED if no specific mapping exists.
+    """
+    # Ensure reference is selected (cached)
+    ref_path = select_reference(wildcards)
+    
+    # Get mapping from config
+    bed_map = config.get("surveillance_beds", {})
+    
+    # Return mapped BED or default
+    return bed_map.get(ref_path, "data/references/surveillance_loci.bed")
 
 def is_cholerae_verified(wildcards):
     """Check if sample passed cholerae verification checkpoint."""
@@ -273,8 +401,9 @@ rule fastp_qc:
         "{output_dir}/{{sample}}/logs/fastp.log".format(output_dir=config["output_dir"])
     shell:
         """
+        set -euo pipefail
         mkdir -p {params.outdir}
-        
+
         R1="{input.fastq}"
         R2=""
         # Detect R2 (robust check)
@@ -370,6 +499,7 @@ rule kraken2_classify:
         "{output_dir}/{{sample}}/logs/kraken2.log".format(output_dir=config["output_dir"])
     shell:
         """
+        set -euo pipefail
         mkdir -p {params.outdir}
         
         echo "Running Kraken2 classification [Tier: {params.memory_tier}]..." > {log}
@@ -404,7 +534,8 @@ rule kraken2_broad_audit:
     params:
         db=get_adaptive_kraken_broad_db,
         outdir=lambda wildcards, output: os.path.dirname(output.kraken_out),
-        memory_tier=get_memory_tier
+        memory_tier=get_memory_tier,
+        memory_mb=config.get("memory_mb", 8000)
     threads: get_adaptive_threads
     conda:
         "envs/kraken2.yaml"
@@ -412,7 +543,17 @@ rule kraken2_broad_audit:
         "{output_dir}/{{sample}}/logs/kraken2_broad.log".format(output_dir=config["output_dir"])
     shell:
         """
+        set -euo pipefail
         mkdir -p {params.outdir}
+        
+        # Skip broad audit if memory constrained
+        if [ {params.memory_mb} -lt 4000 ]; then
+            echo "Skipping broad Kraken2 audit: memory constraint ({params.memory_mb} MB < 4000 MB)" > {log}
+            echo "  0.00	0	0	U	0	unclassified" > {output.kraken_report}
+            echo "  99.99	1000	0	R	1	root" >> {output.kraken_report}
+            touch {output.kraken_out}
+            exit 0
+        fi
         
         echo "Running broad Kraken2 audit [Tier: {params.memory_tier}]..." > {log}
         
@@ -511,7 +652,11 @@ rule extract_unclassified:
 # Replaces Kaiju/Evo2 with ARM-optimized approximate alignment (easy-taxonomy)
 rule rescue_vibrio_reads:
     input:
-        unclassified=rules.extract_unclassified.output.unclassified
+        unclassified=rules.extract_unclassified.output.unclassified,
+        # Pre-built MMseqs2 database (ensures it exists before running)
+        db=config["mmseqs_db"],
+        db_index=config["mmseqs_db"] + ".index",
+        db_taxonomy=config["mmseqs_db"] + "_taxonomy"
     output:
         rescued="{output_dir}/{{sample}}/03_rescue/{{sample}}_rescued_vibrio.fastq.gz".format(
             output_dir=config["output_dir"]
@@ -579,6 +724,7 @@ rule sketch_sample_triage:
         "envs/analysis.yaml"
     shell:
         """
+        set -euo pipefail
         sourmash sketch dna {input.fastq} -o {output.sig} --name {wildcards.sample} -p scaled=100
         """
 
@@ -593,10 +739,12 @@ checkpoint global_reference_triage:
         )
     params:
         ref_dir="data/references",
+        global_ref_dir="data/global_references",
         min_evidence=500  # Hash count threshold (k=31, scaled=100)
     shell:
         """
-        python3 workflow/scripts/triage_reference.py --sample-sig {input.sig} --ref-dir {params.ref_dir} --output {output.match} --serogroup {input.serogroup} --min-evidence {params.min_evidence}
+        set -euo pipefail
+        python3 scripts/triage_reference.py --sample-sig {input.sig} --ref-dir {params.ref_dir} --global-ref-dir {params.global_ref_dir} --output {output.match} --serogroup {input.serogroup} --min-evidence {params.min_evidence}
         """
 
 # Rule 3h: Panel Mapping Discovery (LOW_EVIDENCE escalation)
@@ -631,18 +779,20 @@ rule panel_mapping_discovery:
             exit 0
         fi
         
-        # Low evidence detected: run fast panel mapping with minimap2
+        # Low evidence detected: run fast panel mapping with minimap2 (POSIX-safe)
         echo "⚠️  LOW_EVIDENCE detected. Running panel mapping discovery..."
-        
-        declare -A panel_maps
+
+        tmpfile="{params.outdir}/panel_mapping_rates.$$"
+        : > "$tmpfile"
+
         for ref in {params.panel_refs}; do
             if [ -f "$ref" ]; then
                 ref_name=$(basename "$ref" .fasta)
                 bam_out="{params.outdir}/${{ref_name}}.bam"
-                
+
                 # Quick minimap2 mapping
                 minimap2 -a "$ref" {input.vibrio_fastq} 2>/dev/null | samtools sort -o "$bam_out" -
-                
+
                 # Get mapping stats
                 mapped=$(samtools view -c -F 4 "$bam_out" 2>/dev/null || echo 0)
                 total=$(samtools view -c "$bam_out" 2>/dev/null || echo 1)
@@ -651,35 +801,55 @@ rule panel_mapping_discovery:
                 else
                     map_rate=0
                 fi
-                
+
+                echo "${{ref_name}}\t${{map_rate}}" >> "$tmpfile"
                 echo "${{ref_name}} mapping_rate=${{map_rate}} (mapped=${{mapped}}/${{total}})"
-                panel_maps["$ref_name"]=$map_rate
                 rm -f "$bam_out"
             fi
         done
-        
-        # Select ref with highest mapping rate
-        best_ref=""
-        best_rate=0
-        for ref in "${{!panel_maps[@]}}"; do
-            rate="${{panel_maps[$ref]}}"
-            if (( $(echo "$rate > $best_rate" | bc -l) )); then
-                best_rate="$rate"
-                best_ref="$ref"
-            fi
-        done
-        
-        if [ -z "$best_ref" ]; then
+
+        # Select ref with highest mapping rate (fallback to regional_selection best_match)
+        if [ -s "$tmpfile" ]; then
+            best_line=$(sort -k2 -n "$tmpfile" | tail -n1)
+            best_ref=$(echo "$best_line" | cut -f1)
+            best_rate=$(echo "$best_line" | cut -f2)
+        else
             best_ref=$(grep -o '"best_match": "[^"]*' {input.triage_match} | cut -d'"' -f4)
+            best_rate=0
         fi
-        
-        echo "{{\"discovery_mode\": \"panel_mapping\", \"selected_ref\": \"${{best_ref}}\", \"mapping_rate\": ${{best_rate}}}}" > {output.panel_report}
+
+        # Write a valid JSON file using Python to avoid quoting/formatting issues
+        python3 -c 'import json,sys; print(json.dumps({{"discovery_mode":"panel_mapping","selected_ref":sys.argv[1],"mapping_rate":float(sys.argv[2])}}))' "${{best_ref}}" "${{best_rate}}" > {output.panel_report}
         cp "data/references/${{best_ref}}.fasta" {output.discovery_reference}
+        rm -f "$tmpfile"
+        """
+
+# Rule 3b: Pre-build BWA index for alignment (Performance Optimization)
+rule build_bwa_index:
+    input:
+        reference="{prefix}.fasta"
+    output:
+        bwt="{prefix}.fasta.bwt",
+        pac="{prefix}.fasta.pac",
+        ann="{prefix}.fasta.ann",
+        amb="{prefix}.fasta.amb",
+        sa="{prefix}.fasta.sa"
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{prefix}_bwa_index.log"
+    shell:
+        """
+        set -euo pipefail
+        echo "[bwa index] Building index for {input.reference}" > {log}
+        bwa index {input.reference} 2>> {log}
+        echo "[bwa index] Complete" >> {log}
         """
 
 # Rule 4: Align Vibrio reads to reference genome
 checkpoint align_to_reference:
     input:
+        unpack(get_bwa_index),  # Pre-built BWA index files (must be first - positional)
         vibrio_fastq=rules.merge_vibrio_reads.output.merged,
         reference=select_reference,
         triage_match=rules.global_reference_triage.output.match  # Ensure triage runs first
@@ -703,6 +873,7 @@ checkpoint align_to_reference:
         config["output_dir"] + "/{sample}/logs/align.log"
     shell:
         """
+        set -euo pipefail
         mkdir -p {params.outdir}
 
         set -euo pipefail
@@ -722,15 +893,10 @@ checkpoint align_to_reference:
         # Type B: Long Read/SV (Minimap2) - Optimised for structural variants
         
         ALIGNER="{params.aligner_type}"
-        
-        if [ "$ALIGNER" == "bwa" ]; then
-            # 1. Check/Build BWA Index (if missing)
-            if [ ! -f "{input.reference}.bwt" ]; then
-                echo "[bwa] indexing reference {input.reference}" >> {log}
-                bwa index {input.reference} 2>> {log}
-            fi
 
-            # 2. Align with BWA-MEM (Standard Forensic Mode)
+        if [ "$ALIGNER" == "bwa" ]; then
+            # Align with BWA-MEM (Standard Forensic Mode)
+            # Note: BWA index pre-built by build_bwa_index rule
             # -B 3: Relaxed mismatch penalty (Catch Inaba mutations)
             # -M: Mark split hits as secondary (Picard/Pilon compatibility)
             echo "[align] Running BWA-MEM optimization..." >> {log}
@@ -843,6 +1009,7 @@ rule verify_coverage_integrity:
         "envs/analysis.yaml" 
     shell:
         """
+        set -euo pipefail
         python3 workflow/scripts/check_coverage_integrity.py \
             --bam {input.bam} \
             --output {output.report} \
@@ -855,7 +1022,7 @@ rule verify_coverage_integrity:
 rule map_reference_loci:
     input:
         reference=select_reference,
-        loci=config["reference_dir"] + "/reference_loci.fasta"
+        loci="data/references/reference_loci.fasta"
     output:
         loci_map="{output_dir}/{{sample}}/05_loci/loci_map.json".format(
             output_dir=config["output_dir"]
@@ -868,6 +1035,7 @@ rule map_reference_loci:
         "{output_dir}/{{sample}}/logs/map_loci.log".format(output_dir=config["output_dir"])
     shell:
         """
+        set -euo pipefail
         mkdir -p {params.outdir}
         python3 workflow/scripts/map_coords.py \
             --reference {input.reference} \
@@ -950,6 +1118,7 @@ rule align_sv_supplementary:
         "{output_dir}/{{sample}}/logs/align_structural.log".format(output_dir=config["output_dir"])
     shell:
         """
+        set -euo pipefail
         # If primary is already Minimap2, just symlink it to save time
         if [ "{params.aligner_type}" == "minimap2" ]; then
              echo "[sv_align] Primary is already Minimap2. Symlinking..." >> {log}
@@ -992,6 +1161,7 @@ rule validate_structural_variants:
         "{output_dir}/{{sample}}/logs/structural_validation.log".format(output_dir=config["output_dir"])
     shell:
         """
+        set -euo pipefail
         python3 workflow/scripts/validate_structural_variants.py \
             --primary-bam {input.primary_bam} \
             --structural-bam {input.sv_bam} \
@@ -1041,6 +1211,7 @@ rule generate_consensus:
         "{output_dir}/{{sample}}/logs/generate_consensus.log".format(output_dir=config["output_dir"])
     shell:
         """
+        set -euo pipefail
         mkdir -p {params.outdir}
         python3 workflow/scripts/generate_consensus_genome.py \
             --bam {input.bam} \
@@ -1174,7 +1345,8 @@ rule forensic_confirmation:
         "{output_dir}/{{sample}}/logs/forensic_confirmation.log".format(output_dir=config["output_dir"])
     shell:
         """
-        python3 workflow/scripts/forensic_biotyping.py {input.consensus} --output {output.report} 2>&1 | tee {log}
+        set -euo pipefail
+        python3 scripts/forensic_biotyping.py {input.consensus} --output {output.report} 2>&1 | tee {log}
         """
 
 
@@ -1182,8 +1354,7 @@ rule forensic_confirmation:
 rule extract_surveillance_loci:
     input:
         reference=rules.polish_consensus.output.polished,
-        bed=config["reference_dir"] + "/surveillance_loci.bed",
-        ref_loci=config["reference_dir"] + "/reference_loci.fasta"
+        bed=get_surveillance_bed
     output:
         loci_fasta="{output_dir}/{{sample}}/05_loci/surveillance_loci.fasta".format(
             output_dir=config["output_dir"]
@@ -1201,7 +1372,7 @@ rule extract_surveillance_loci:
 rule extract_reference_loci:
     input:
         reference=select_reference,
-        bed=config["reference_dir"] + "/surveillance_loci.bed"
+        bed=get_surveillance_bed
     output:
         loci_fasta="{output_dir}/{{sample}}/05_loci/reference_loci.fasta".format(
             output_dir=config["output_dir"]
@@ -1235,6 +1406,7 @@ rule detect_serogroup:
         "{output_dir}/{{sample}}/logs/detect_serogroup.log".format(output_dir=config["output_dir"])
     shell:
         """
+        set -euo pipefail
         mkdir -p {params.outdir}
         python3 workflow/scripts/detect_serogroup.py \
             {input.vibrio_fastq} \
@@ -1261,7 +1433,8 @@ checkpoint strain_triage:
         "{output_dir}/{{sample}}/logs/strain_triage.log".format(output_dir=config["output_dir"])
     shell:
         """
-        python3 workflow/scripts/strain_triage_alert.py \
+        set -euo pipefail
+        python3 scripts/strain_triage_alert.py \
             --serogroup {input.report} \
             --output {output.decision} \
             --sample {params.sample_id} \
@@ -1406,6 +1579,7 @@ rule sourmash_divergence:
         "{output_dir}/{{sample}}/logs/sourmash_divergence.log".format(output_dir=config["output_dir"])
     shell:
         """
+        set -euo pipefail
         $CONDA_PREFIX/bin/python3 workflow/scripts/sourmash_triage.py \
             --sample-fasta {input.sample_fasta} \
             --sentinel-ref {input.sentinel_ref} \
@@ -1445,6 +1619,7 @@ rule local_triage:
         "{output_dir}/{{sample}}/logs/local_triage.log".format(output_dir=config["output_dir"])
     shell:
         """
+        set -euo pipefail
         export PYTORCH_ENABLE_MPS_FALLBACK=1
         $CONDA_PREFIX/bin/python3 workflow/scripts/local_triage.py \
             --tier0-json {input.tier0_json} \
@@ -1483,6 +1658,7 @@ rule global_triage:
         "{output_dir}/{{sample}}/logs/global_triage.log".format(output_dir=config["output_dir"])
     shell:
         """
+        set -euo pipefail
         python3 workflow/scripts/global_triage.py \
             --sample-fasta {input.sample_fasta} \
             --ref-dir {input.global_ref_dir} \
@@ -1565,6 +1741,7 @@ rule hyena_analyze:
     threads: 4 # MPS handles parallelism, but we limit CPU threads
     shell:
         """
+        set -euo pipefail
         mkdir -p $(dirname {output.report})
         python3 {params.script} \
             --input {input.assembly} \
@@ -1590,8 +1767,9 @@ rule predict_phenotype:
         "{output_dir}/{{sample}}/logs/predict_phenotype.log".format(output_dir=config["output_dir"])
     shell:
         """
+        set -euo pipefail
         mkdir -p {params.outdir}
-        python3 workflow/scripts/phenotypic_prediction.py \
+        python3 scripts/phenotypic_prediction.py \
             {input.vibrio_fastq} \
             --ref {input.reference} \
             --output {output.report} \
@@ -1614,8 +1792,9 @@ rule phage_sentinel:
         "{output_dir}/{{sample}}/logs/phage_sentinel.log".format(output_dir=config["output_dir"])
     shell:
         """
+        set -euo pipefail
         mkdir -p {params.outdir}
-        python3 workflow/scripts/phage_sentinel.py \
+        python3 scripts/phage_sentinel.py \
             --input {input.kraken_report} \
             --output {output.report} \
             2>&1 | tee {log}
@@ -1629,11 +1808,33 @@ rule phage_sentinel:
 # Professional CholeraSeq Architecture.
 # Replaces de-novo alignment with reference-based core matrix.
 # Engine: IQ-TREE2 (+ASC) + TreeTime.
+# Rule 13a: Pre-compute reference tree (Performance optimization - caching)
+# OPTIONAL: Uncomment this rule to enable reference tree caching
+# rule build_reference_tree:
+#     input:
+#         ref_alignment="data/core_alignment/reference_core_alignment.fasta"
+#     output:
+#         ref_tree="data/core_alignment/reference_tree.nwk"
+#     conda:
+#         "envs/analysis.yaml"
+#     threads: config["threads"]
+#     log:
+#         "data/core_alignment/reference_tree.log"
+#     shell:
+#         """
+#         set -euo pipefail
+#         iqtree_bin=$(which iqtree2 || which iqtree)
+#         $iqtree_bin -s {input.ref_alignment} -m GTR+G -nt {threads} \
+#             -pre data/core_alignment/reference_tree_build > {log} 2>&1 || true
+#         cp data/core_alignment/reference_tree_build.treefile {output.ref_tree} || touch {output.ref_tree}
+#         """
+
 rule cholera_seq_tree:
     input:
         consensus=rules.polish_consensus.output.polished,
         loci=rules.extract_surveillance_loci.output.loci_fasta,
         ref_alignment="data/core_alignment/reference_core_alignment.fasta"
+        # ref_tree=rules.build_reference_tree.output.ref_tree  # Optional: enable if tree caching needed
     output:
         tree_nwk="{output_dir}/{{sample}}/10_phylogeny/tree.nwk".format(
             output_dir=config["output_dir"]
@@ -1649,6 +1850,7 @@ rule cholera_seq_tree:
     threads: config["threads"]
     shell:
         """
+        set -euo pipefail
         python3 workflow/scripts/cholera_seq_tree.py \
             --consensus {input.consensus} \
             --loci {input.loci} \
@@ -1677,6 +1879,7 @@ rule enhanced_tree_viz:
         "envs/phylogeny.yaml"
     shell:
         """
+        set -euo pipefail
         Rscript workflow/scripts/enhanced_tree_viz.R \
             {input.tree_nwk} \
             {input.metadata} \
@@ -1702,7 +1905,8 @@ rule detect_amr_rgi:
     threads: config["threads"]
     shell:
         """
-        python3 workflow/scripts/detect_amr_rgi.py \
+        set -euo pipefail
+        python3 scripts/detect_amr_rgi.py \
             --consensus {input.consensus} \
             --output {output.report} \
             --threads {threads}
@@ -1724,7 +1928,10 @@ rule public_health_typing:
         "{output_dir}/{{sample}}/logs/public_health_typing.log".format(output_dir=config["output_dir"])
     shell:
         """
+        set -euo pipefail
         python3 workflow/scripts/predict_serotype.py \
+            --vcf {input.vcf} \
+            --bed data/references/surveillance_loci.bed \
             --vcf {input.vcf} \
             --sample {params.sample_id} \
             --output {output.report} \
@@ -1747,12 +1954,34 @@ rule resolve_haplotypes:
         "{output_dir}/{{sample}}/logs/resolve_haplotypes.log".format(output_dir=config["output_dir"])
     shell:
         """
+        set -euo pipefail
         python3 workflow/scripts/resolve_haplotypes.py \
             --bam {input.bam} \
             --snp-report {input.snp_report} \
             --output {output.haplotypes} \
             2>&1 | tee {log}
         """
+
+# Rule 17: Calculate VRS (Vibrio Resurgence Score)
+rule calculate_vrs:
+    input:
+        evo2_result=rules.evo2_analyze.output.report,
+        vibrio_stats=rules.extract_vibrio.output.stats,
+        hostile_stats=rules.hostile_clean.output.stats,
+        public_health=rules.public_health_typing.output.report,
+        amr_report=rules.detect_amr.output.amr_report
+    output:
+        vrs="{output_dir}/{{sample}}/08_comprehensive_report/vrs_score.json".format(
+            output_dir=config["output_dir"]
+        )
+    params:
+        sample_id=lambda wildcards: wildcards.sample
+    conda:
+        "envs/analysis.yaml"
+    log:
+        "{output_dir}/{{sample}}/logs/calculate_vrs.log".format(output_dir=config["output_dir"])
+    script:
+        "scripts/calculate_vrs.py"
 
 # Rule 9: Generate comprehensive surveillance report
 rule generate_comprehensive_report:
@@ -1780,7 +2009,8 @@ rule generate_comprehensive_report:
         polished=rules.polish_consensus.output.polished,
         public_health=rules.public_health_typing.output.report,
         haplotypes=rules.resolve_haplotypes.output.haplotypes,
-        regional_selection=rules.global_reference_triage.output.match
+        regional_selection=rules.global_reference_triage.output.match,
+        vrs_report=rules.calculate_vrs.output.vrs
     output:
         report="{output_dir}/{{sample}}/08_comprehensive_report/surveillance_report.md".format(
             output_dir=config["output_dir"]
