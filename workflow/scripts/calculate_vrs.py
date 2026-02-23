@@ -12,6 +12,8 @@ from datetime import datetime
 evo2_result_file = Path(snakemake.input.evo2_result) # noqa: F821
 vibrio_stats_file = Path(snakemake.input.vibrio_stats) # noqa: F821
 hostile_stats_file = Path(snakemake.input.hostile_stats) # noqa: F821
+serotype_report_file = Path(snakemake.input.serotype_report) # noqa: F821
+amr_report_file = Path(snakemake.input.amr_report) # noqa: F821
 output_file = Path(snakemake.output.vrs) # noqa: F821
 sample_id = snakemake.params.sample_id # noqa: F821
 
@@ -29,6 +31,12 @@ with open(vibrio_stats_file) as f:
 
 with open(hostile_stats_file) as f:
     hostile_stats = json.load(f)
+
+with open(serotype_report_file) as f:
+    serotype_report = json.load(f)
+
+with open(amr_report_file) as f:
+    amr_report = json.load(f)
 
 # Extract key metrics
 sentinel_score = evo2_data.get("sentinel_score", 5)  # 0-10 scale
@@ -51,14 +59,35 @@ print(f"   Vibrio Abundance: {vibrio_percentage:.1f}%")
 # 2. Vibrio abundance (environmental load) - 30% weight
 # 3. Alert level multiplier - amplifies high-threat scenarios
 
-# Component 1: Genomic Threat (0-60 points)
-# Sentinel score 0-10 maps to 0-60 points
-genomic_threat_score = (sentinel_score / 10) * 60
+# Component 1: Genomic Threat (0-60 points) with hapR Multiplier
+# Sentinel score 0-10 maps to 0-60 points, then apply hapR derepressed virulence multiplier
+base_genomic_threat = (sentinel_score / 10) * 60
 
-# Component 2: Abundance (0-30 points)
-# Higher Vibrio percentage = higher environmental risk
-# Cap at 100% for percentage, scale to 30 points
-abundance_score = min(vibrio_percentage, 100) * 0.3
+# Extract hapR threat multiplier (1.0-1.5x)
+hapR_multiplier = serotype_report.get('public_health_guidance', {}).get(
+    'reservoir_persistence', {}).get('threat_multiplier', 1.0)
+
+genomic_threat_score = base_genomic_threat * hapR_multiplier
+
+# Component 2: Abundance (0-30 points) — Tiered Threshold System
+# Replaces old linear scoring (vibrio_percentage * 0.3) which undervalued
+# low-level detections critical for early warning surveillance.
+def score_abundance(pct):
+    """Tiered abundance scoring for environmental surveillance."""
+    if pct <= 0:
+        return 0, "NOT_DETECTED"
+    elif pct < 1:
+        return 10, "DETECTION"
+    elif pct < 5:
+        return 15, "INTRUSION"
+    elif pct < 20:
+        return 20, "BLOOM"
+    elif pct < 50:
+        return 25, "DOMINANCE"
+    else:
+        return 30, "CRISIS"
+
+abundance_score, abundance_tier = score_abundance(vibrio_percentage)
 
 # Component 3: Alert Level Multiplier
 alert_multipliers = {
@@ -69,11 +98,19 @@ alert_multipliers = {
 }
 multiplier = alert_multipliers.get(alert_level, 1.0)
 
-# Baseline VRS before multiplier
+# Baseline VRS before multipliers
 baseline_vrs = genomic_threat_score + abundance_score
 
-# Final VRS with alert multiplier
-vrs_raw = baseline_vrs * multiplier
+# Extract transmission state escalation (0 or 1)
+transmission_state = amr_report.get('threat_assessment', {}).get('transmission_state', {})
+transmission_escalation = transmission_state.get('threat_escalation', 0)
+
+# Apply transmission state boost (10% per escalation level) + alert multiplier
+if transmission_escalation > 0:
+    transmission_boost = 1 + (0.1 * transmission_escalation)
+    vrs_raw = baseline_vrs * transmission_boost * multiplier
+else:
+    vrs_raw = baseline_vrs * multiplier
 
 # Cap at 100
 vrs = min(100, round(vrs_raw, 1))
@@ -113,8 +150,12 @@ def categorize_risk(vrs_value: float) -> dict:
 risk_info = categorize_risk(vrs)
 
 print("   VRS Calculation:")
-print(f"      Genomic Threat: {genomic_threat_score:.1f}/60")
-print(f"      Abundance: {abundance_score:.1f}/30")
+print(f"      Base Genomic Threat: {base_genomic_threat:.1f}/60")
+print(f"      hapR Multiplier: {hapR_multiplier}x")
+print(f"      Genomic Threat (after hapR): {genomic_threat_score:.1f}/60")
+print(f"      Abundance: {abundance_score:.1f}/30 ({abundance_tier})")
+if transmission_escalation > 0:
+    print(f"      Transmission State: {transmission_state.get('state', 'UNKNOWN')} (+{transmission_escalation*10}%)")
 print(f"      Alert Multiplier: {multiplier}x")
 print(f"      Final VRS: {vrs}/100 ({risk_info['category']})")
 
@@ -132,8 +173,13 @@ result = {
     
     # VRS Component Breakdown
     "vrs_components": {
+        "base_genomic_threat": round(base_genomic_threat, 1),
+        "hapR_multiplier": hapR_multiplier,
         "genomic_threat_score": round(genomic_threat_score, 1),
         "abundance_score": round(abundance_score, 1),
+        "abundance_tier": abundance_tier,
+        "transmission_state": transmission_state.get('state', 'UNKNOWN'),
+        "transmission_escalation": transmission_escalation,
         "baseline_vrs": round(baseline_vrs, 1),
         "alert_multiplier": multiplier,
         "final_vrs": vrs

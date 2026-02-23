@@ -101,21 +101,64 @@ def analyze_toxin(ctxB_variants):
         "evidence": f"Mutations detected in ctxB relative to B7: {variant_desc}"
     }
 
-def check_environmental_markers(hapR_variants):
+def assess_hapR_status(hapR_variants, ctxAB_detected=False):
     """
-    Checks hapR status.
-    Reference 2010EL-1786 has a functional hapR? 
-    Actually, many epidemic strains have MUTATED hapR (locked in virulence mode).
+    Four-level hapR regulator assessment.
+    hapR is the master QS repressor — its loss derepresses biofilm AND virulence.
+    
+    Levels:
+      FUNCTIONAL        — No variants, normal QS regulation
+      VARIANT           — SNP (missense), partial disruption possible
+      LOF_MUTANT        — Frameshift/stop-gain, biofilm & virulence derepressed
+      DEREPRESSED_VIRULENCE — LOF + ctxAB present = super-producer phenotype
     """
     if not hapR_variants:
         return {
-            "status": "Reference-Like",
-            "implication": "Consistent with 2010 lineage."
+            "regulator_status": "FUNCTIONAL",
+            "implication": "Normal quorum sensing regulation. Consistent with 2010 lineage.",
+            "threat_multiplier": 1.0
         }
-    
+
+    # Check for LOF indicators: frameshift (indel) or stop-gained
+    is_lof = False
+    for v in hapR_variants:
+        # Frameshift: ref and alt differ in length
+        if len(v.get('ref', '')) != len(v.get('alt', '')):
+            is_lof = True
+            break
+        # stop_gained in INFO/annotation
+        info = v.get('info', '')
+        if 'stop_gained' in info or 'frameshift' in info:
+            is_lof = True
+            break
+
+    if is_lof and ctxAB_detected:
+        return {
+            "regulator_status": "DEREPRESSED_VIRULENCE",
+            "implication": "Super-producer phenotype. hapR LOF + ctxAB = constitutive toxin expression.",
+            "threat_multiplier": 1.5
+        }
+    elif is_lof:
+        return {
+            "regulator_status": "LOF_MUTANT",
+            "implication": "Biofilm and virulence derepressed. No ctxAB detected.",
+            "threat_multiplier": 1.3
+        }
+    else:
+        return {
+            "regulator_status": "VARIANT",
+            "implication": "SNP-level variation in hapR. Partial disruption possible.",
+            "threat_multiplier": 1.1
+        }
+
+
+# Legacy alias for backward compatibility
+def check_environmental_markers(hapR_variants):
+    """Backward-compatible wrapper around assess_hapR_status."""
+    result = assess_hapR_status(hapR_variants, ctxAB_detected=False)
     return {
-        "status": "Mutated",
-        "implication": "Potential variation in biofilm/virulence regulation."
+        "status": result["regulator_status"],
+        "implication": result["implication"]
     }
 
 def main():
@@ -138,12 +181,16 @@ def main():
     toxin = analyze_toxin(ctxB_vars)
     print(f"   ☠️  Toxin Genotype: {toxin['genotype']}")
     
+    # Detect ctxAB presence (needed for hapR derepressed virulence assessment)
+    ctxAB_detected = len(ctxB_vars) == 0  # No variants vs reference = ctxB present
+    
     # 3. Colonization (tcpA)
     tcpA_vars = parse_vcf_variants(args.vcf, LOCI['tcpA'])
     
-    # 4. Persistence (hapR)
+    # 4. Persistence (hapR) — Enhanced 4-level assessment
     hapR_vars = parse_vcf_variants(args.vcf, LOCI['hapR'])
-    persistence = check_environmental_markers(hapR_vars)
+    persistence = assess_hapR_status(hapR_vars, ctxAB_detected=ctxAB_detected)
+    print(f"   🧬 hapR Status: {persistence['regulator_status']} (x{persistence['threat_multiplier']})")
     
     # Build Report
     report = {
@@ -165,7 +212,8 @@ def main():
             },
             "reservoir_persistence": {
                 "gene": "hapR",
-                "status": persistence['status'],
+                "regulator_status": persistence.get('regulator_status', persistence.get('status', 'UNKNOWN')),
+                "threat_multiplier": persistence.get('threat_multiplier', 1.0),
                 "implication": persistence['implication'],
                 "variant_count": len(hapR_vars)
             }

@@ -43,14 +43,20 @@ rule polish_consensus:
 
     shell:
         """
+        # Fix for environment activation issue on macOS
+        PYTHON_EXE="$CONDA_PREFIX/bin/python3"
+        if [ ! -f "$PYTHON_EXE" ]; then
+            PYTHON_EXE="python3"
+        fi
+
         # Coverage Logic Gate (Thermal + Forensic Safety)
-        COVERAGE=$(python3 -c "import json; print(json.load(open('{input.coverage_report}'))['metrics']['global_depth'])")
+        COVERAGE=$($PYTHON_EXE -c "import json; print(json.load(open('{input.coverage_report}'))['metrics']['global_depth'])")
         MIN_COV=10.0
         
         echo "Coverage Check: ${{COVERAGE}}x (threshold: ${{MIN_COV}}x)" >> {log}
         
         # Check if coverage is sufficient for polishing
-        if python3 -c "import sys; sys.exit(0 if $COVERAGE < $MIN_COV else 1)"; then
+        if $PYTHON_EXE -c "import sys; sys.exit(0 if $COVERAGE < $MIN_COV else 1)"; then
             echo "⚠️  Coverage too low for polishing (<${{MIN_COV}}x)" >> {log}
             echo "ℹ️  Thermal Safety: Skipping expensive polishing on low-coverage data" >> {log}
             echo "ℹ️  Forensic Safety: Preventing artifactual 'polished' genome from insufficient data" >> {log}
@@ -63,15 +69,15 @@ rule polish_consensus:
             echo "✅ Coverage sufficient (${{COVERAGE}}x >= ${{MIN_COV}}x). Proceeding with polishing." >> {log}
             
             # Read platform from detection report
-            PLATFORM=$(python3 -c "import json; print(json.load(open('{input.platform_report}'))['platform'])")
-            POLISHER=$(python3 -c "import json; print(json.load(open('{input.platform_report}'))['polisher_config']['tool'])")
+            PLATFORM=$($PYTHON_EXE -c "import json; print(json.load(open('{input.platform_report}'))['platform'])")
+            POLISHER=$($PYTHON_EXE -c "import json; print(json.load(open('{input.platform_report}'))['polisher_config']['tool'])")
             
             echo "Platform: $PLATFORM" >> {log}
             echo "Polisher: $POLISHER" >> {log}
             
             if [ "$POLISHER" = "medaka" ]; then
                 # Nanopore polishing
-                python3 workflow/scripts/polish_medaka.py \
+                $PYTHON_EXE workflow/scripts/polish_medaka.py \
                     --draft {input.draft} \
                     --reads {input.reads} \
                     --output {output.polished} \
@@ -80,7 +86,7 @@ rule polish_consensus:
                     2>&1 | tee -a {log}
             elif [ "$POLISHER" = "pilon" ]; then
                 # Illumina polishing (Hybrid v2.1: Polypolish -> Pilon)
-                python3 workflow/scripts/polish_hybrid_illumina.py \
+                $PYTHON_EXE workflow/scripts/polish_hybrid_illumina.py \
                     --draft {input.draft} \
                     --reads {input.reads} \
                     --output {output.polished} \
@@ -103,7 +109,9 @@ rule polish_consensus:
         export MANIFEST_OUTPUT_PATH="{output.manifest}"
         export MANIFEST_LOG="{log}"
 
-        python3 - <<'PY'
+        export MANIFEST_LOG="{log}"
+
+        $PYTHON_EXE - <<'PY'
 import json
 import hashlib
 import subprocess

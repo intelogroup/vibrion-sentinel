@@ -319,6 +319,75 @@ def format_immune_evasion_section(amr_data: Dict[str, Any]) -> str:
     
     return section
 
+def format_transmission_state_section(amr_data: Dict[str, Any]) -> str:
+    """Format Transmission State (Motility/Chemotaxis) section"""
+    if not amr_data:
+        return ""
+    
+    threat = amr_data.get("threat_assessment", {})
+    transmission_state = threat.get("transmission_state", {})
+    
+    if not transmission_state:
+        return ""
+    
+    state = transmission_state.get("state", "UNKNOWN")
+    description = transmission_state.get("description", "No description available")
+    escalation = transmission_state.get("threat_escalation", 0)
+    markers = transmission_state.get("markers", {})
+    
+    section = "\n## 1g. Transmission State (Motility & Chemotaxis)\n"
+    
+    # State-specific icons and alerts
+    if state == "HYPER_TRANSMITTER":
+        icon = "🚨"
+        alert_level = "CRITICAL"
+        section += f"### {icon} {state} ({alert_level})\n"
+        section += "> [!CAUTION]\n"
+        section += "> **High Transmission Alert:** This strain exhibits a hyperinfectious phenotype with intact motility and chemotaxis machinery.\n"
+        section += "> **Clinical Significance:** Increased environmental persistence, enhanced host colonization, and elevated transmission potential.\n\n"
+    elif state == "SEEKING_PLANKTONIC":
+        icon = "⚠️"
+        alert_level = "MODERATE"
+        section += f"### {icon} {state} ({alert_level})\n"
+        section += "> [!WARNING]\n"
+        section += "> **Moderate Transmission Alert:** Partial motility/chemotaxis detected.\n"
+        section += "> **Clinical Significance:** Reduced but still active transmission capability.\n\n"
+    elif state == "BIOFILM_RESERVOIR":
+        icon = "🟢"
+        alert_level = "LOW"
+        section += f"### {icon} {state} ({alert_level})\n"
+        section += f"**Description:** {description}\n"
+        section += "**Clinical Significance:** Sessile/biofilm lifestyle with reduced acute transmission risk.\n\n"
+    else:
+        icon = "⚪"
+        section += f"### {icon} {state}\n"
+        section += f"**Description:** {description}\n\n"
+    
+    # Marker table
+    section += "### Motility & Chemotaxis Markers\n"
+    section += "| Marker | Status | Function |\n"
+    section += "|---|---|---|\n"
+    
+    marker_functions = {
+        "flaA": "Flagellin (structural)",
+        "motA": "Flagellar motor (torque)",
+        "motB": "Flagellar motor (stator)",
+        "motV": "Flagellar motor (variant)",
+        "cheA": "Chemotaxis sensor kinase",
+        "cheY": "Chemotaxis response regulator"
+    }
+    
+    for marker, function in marker_functions.items():
+        status = "✅ PRESENT" if markers.get(marker, False) else "❌ ABSENT"
+        section += f"| `{marker}` | {status} | {function} |\n"
+    
+    section += f"\n**Threat Escalation:** {'+' if escalation > 0 else ''}{escalation} level(s)\n"
+    if escalation > 0:
+        section += f"**VRS Impact:** +{escalation * 10}% boost to baseline VRS score\n"
+    
+    section += "\n"
+    return section
+
 def format_advanced_forensic_section(serogroup_info: Dict[str, Any]) -> str:
     """Format Advanced Forensic markers (ctxB, SXT, VNTR)"""
     biotype = serogroup_info.get("forensic_biotypology", {})
@@ -423,7 +492,13 @@ def format_sxt_section(sxt_data: Dict[str, Any]) -> str:
     elif status == "SKIPPED":
         section += f"⚪ **Skipped:** {sxt_data.get('reason')}\n"
     else:
-        section += f"⚠️ **Assembly Issues:** {sxt_data.get('reason', 'Unknown error')}\n"
+        # Check for coverage fallback (added 2025)
+        cov = sxt_data.get("mean_depth", 0.0)
+        if cov > 2.0:
+             section += f"⚠️ **Assembly Failed but DETECTED** (Depth: {cov:.1f}x)\n"
+             section += f"> Assembly failed ({sxt_data.get('reason')}) but sequence data confirms SXT presence via read mapping.\n"
+        else:
+             section += f"⚠️ **Assembly Issues:** {sxt_data.get('reason', 'Unknown error')}\n"
         
     return section
 
@@ -525,6 +600,28 @@ def format_contamination_section(broad_report_path: str) -> str:
         
     return section
 
+def get_kraken_genus_percentage(report_path: str, genus: str = "Vibrio") -> float:
+    """Extract the total percentage of reads rooted at a specific Genus."""
+    if not report_path or not os.path.exists(report_path):
+        return 0.0
+        
+    try:
+        with open(report_path, "r") as f:
+            for line in f:
+                parts = line.strip().split("\t")
+                if len(parts) < 6:
+                    continue
+                
+                # Kraken format: pct, reads_rooted, reads_direct, rank, taxid, name
+                rank = parts[3]
+                name = parts[5].strip()
+                
+                if rank == "G" and name == genus:
+                    return float(parts[0])
+    except Exception:
+        pass
+    return 0.0
+
 def generate_markdown_report(data: Dict, output_path: str):
     """Generate nicely formatted Markdown report"""
     
@@ -576,6 +673,25 @@ def generate_markdown_report(data: Dict, output_path: str):
     if metabolic_score == 0.0:
         is_non_cholera = True
     
+    # ---------------------------------------------------------
+    # REFINED LOGIC (2025 Update): Smart Contamination Handling
+    # ---------------------------------------------------------
+    
+    # Calculate True Vibrio Biomass (Cholerae + Vibrio sp.)
+    vibrio_biomass_pct = vibrio_stats.get('vibrio_cholerae_percentage', 0.0)
+    
+    # Check for 'unclassified_vibrio_percentage' or calculate from broad report
+    # 2025: Use Genus-level purity from Broad Report if available (captures unclassified Vibrio)
+    broad_vibrio_pct = get_kraken_genus_percentage(data.get("broad_report"), "Vibrio")
+    
+    # Still check classic list for context if needed, effectively redundant for purity score but good for logging
+    unclassified_vibrio_pct = 0.0
+    
+    # 2025 Refinement: Use the HIGHEST evidence of purity
+    # The dedicated cholerae DB might miss reads (lower %), while Broad DB captures them.
+    # We trust the Broad DB for "Genus Purity" if it's higher.
+    total_vibrio_purity = max(vibrio_biomass_pct + unclassified_vibrio_pct, broad_vibrio_pct)
+    
     # Determination of Stop-Light Status and QC State
     if integrity_status == "QC_FAIL":
         qc_passed = False
@@ -583,21 +699,22 @@ def generate_markdown_report(data: Dict, output_path: str):
         header_title = "ANALYSIS HALTED"
         
         if total_reads > 1000:
-             if vibrio_pct < 1.0:
+             if total_vibrio_purity < 1.0:
                  # True Negative / Wrong Sample
                  header_subtitle = "Taxonomic Mismatch (0% Vibrio)"
                  qc_reason = "Sample contains 0% Vibrio. Check sample provenance or environmental control."
-             elif vibrio_pct < 90.0:
-                 # Dual-Outbreak / Rescue Mode
-                 qc_passed = True # Rescue Activated
-                 header_color = "🟡 YELLOW"
-                 header_title = "PATHOGEN DETECTED (POLYMICROBIAL)"
-                 header_subtitle = f"Mixed Infection / Low Purity ({vibrio_pct:.1f}% Vibrio)"
-                 qc_reason = "Sample is polymicrobial. Target pathogen detected but background is high. 'Rescue Mode' enabled."
+             elif total_vibrio_purity < 60.0:
+                 # Significant Non-Vibrio Contamination
+                 qc_reason = f"High Contamination. Only {total_vibrio_purity:.1f}% Vibrio genus detected."
+                 header_subtitle = "Sample Contaminated"
              else:
-                 # Standard failure (High purity but low coverage?)
-                 header_subtitle = "Quality Collapse"
-                 qc_reason = f"Low coverage ({coverage.get('metrics', {}).get('global_depth', 0)}x) despite read count."
+                 # QC_FAIL but High Vibrio Purity -> Coverage Issue (Swiss Cheese)
+                 # Rescue Activated
+                 qc_passed = True 
+                 header_color = "🟡 YELLOW"
+                 header_title = "PATHOGEN DETECTED (LOW QUALITY)"
+                 header_subtitle = f"Low Coverage / Resolution (Total Vibrio: {total_vibrio_purity:.1f}%)"
+                 qc_reason = "Sample has Vibrio DNA but coverage is too low for certification. 'Rescue Mode' enabled."
         else:
              header_subtitle = "Low Biomass (<1000 reads)"
              qc_reason = "Insufficient DNA for consensus. Consider re-extracting from larger volume."
@@ -690,15 +807,16 @@ def generate_markdown_report(data: Dict, output_path: str):
     if "ctxB7" in str(ph_data):
         recommendations.append("- **[CLINICAL] High Virulence Warning:** Genotype **ctxB7** (Haiti/Classical) confirmed. Alert clinicians to prepare for higher secretory volumes and rapid clinical progression.")
 
-    if recommendations:
+    # Phage Trap Logic (Challenge 1)
+    phage_report = data.get("phage_report", {})
+    has_phage_alert = phage_report.get("alert_triggered", False)
+
+    if recommendations or has_phage_alert:
         report.append("\n## 3. Operational & Clinical Guidance")
         for rec in recommendations:
             report.append(rec)
-        report.append("\n")
         
-        # Phage Trap Logic (Challenge 1)
-        phage_report = data.get("phage_report", {})
-        if phage_report.get("alert_triggered"):
+        if has_phage_alert:
             phage_pct = phage_report.get("overall_ratio_normalized", 0.0) * 100
             status = phage_report.get("status", "UNKNOWN")
             report.append(f"""
@@ -708,6 +826,7 @@ def generate_markdown_report(data: Dict, output_path: str):
 > **Status:** {status}
 > **Insight:** Bioinformatic signal suggests *Vibrio cholerae* was present but lysed by bacteriophages (ICP1/2/3). This may explain the low *Vibrio* recovery. Treat as **PRESUMPTIVE POSITIVE** via clinical correlation.
 """)
+        report.append("\n")
 
     # Proceed with Analysis ONLY if QC Passed
     if qc_passed:
@@ -769,6 +888,10 @@ def generate_markdown_report(data: Dict, output_path: str):
         forensic_core = format_forensic_section(data.get("ctx_report", {}), data.get("qc_checksum", {}), is_environmental=is_non_cholera)
         report.append("\n" + forensic_core)
         
+        # SXT/MDR Element Resolution (added 2025)
+        sxt_section = format_sxt_section(data.get("sxt_report", {}))
+        report.append("\n" + sxt_section)
+        
         # 3c. Advanced Genomic Forensics & Phages
         adv_forensic = format_advanced_forensic_section(data.get("serogroup_info", {}))
         if adv_forensic:
@@ -782,6 +905,11 @@ def generate_markdown_report(data: Dict, output_path: str):
         immune_section = format_immune_evasion_section(data.get("amr_report", {}))
         if immune_section:
             report.append(immune_section)
+        
+        # Transmission State Section (Motility/Chemotaxis)
+        transmission_section = format_transmission_state_section(data.get("amr_report", {}))
+        if transmission_section:
+            report.append(transmission_section)
 
         global_match_section = format_global_match_section(data.get("global_match"))
         if global_match_section:
@@ -821,6 +949,8 @@ def generate_markdown_report(data: Dict, output_path: str):
         # If we have a successful local assembly, we accept it as valid plasticity
         # even if reference alignment was poor
         sxt_plasticity = "VALID (Variant Structure)"
+    elif sxt_data.get("mean_depth", 0.0) > 2.0:
+        sxt_plasticity = "DETECTED (Coverage Verified)"
     
     # Simulating Barcode Purity from Vibrio Stats (Proxy)
     # in real production this comes from the demultiplexer
@@ -839,10 +969,10 @@ def generate_markdown_report(data: Dict, output_path: str):
     
     # Purity Logic (Geospatial Bias Adjusted)
     purity_status = f">{purity_score}% (PASS)"
-    if vibrio_pct < 90.0:
-        purity_status = f"{vibrio_pct:.1f}% (FAIL - High Contamination)"
-    elif vibrio_pct < 95.0:
-        purity_status = f"{vibrio_pct:.1f}% (LOW CONFIDENCE - Manual Review)"
+    if total_vibrio_purity < 60.0:
+        purity_status = f"{total_vibrio_purity:.1f}% (FAIL - High Contamination)"
+    elif total_vibrio_purity < 90.0:
+        purity_status = f"{total_vibrio_purity:.1f}% (WARN - Unclassified Vibrio Included)"
         
     report.append(f"- **Barcode Purity (Cross-Talk):** {purity_status}")
     
@@ -860,7 +990,11 @@ def generate_markdown_report(data: Dict, output_path: str):
         verdict = "🛑 REVOKED (Data Quality)"
     elif integrity_status == "FAIL":
         verdict = "🛑 REVOKED (Tampering Detected)"
-    
+    elif total_vibrio_purity < 60.0:
+        verdict = "🛑 REVOKED (High Contamination)"
+    elif total_vibrio_purity < 90.0:
+        verdict = "⚠️ CONDITIONAL (Rescue Mode - Manual Review Required)"
+
     report.append(f"> **VERDICT:** {verdict}")
     report.append("> This genome sequence has been cryptographically signed and validated against the WHO/GTFCC Forensic Guidelines.")
     report.append("\n**Signed:** *Vibrion Sentinel Automated Pipeline* 🤖🇭🇹")

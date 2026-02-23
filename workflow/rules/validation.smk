@@ -19,7 +19,13 @@ rule validate_checksum:
         "{output_dir}/{{sample}}/logs/validate_checksum.log".format(output_dir=config["output_dir"])
     shell:
         """
-        python3 workflow/scripts/validate_checksum.py \
+        # Fix for environment activation issue on macOS
+        PYTHON_EXE="$CONDA_PREFIX/bin/python3"
+        if [ ! -f "$PYTHON_EXE" ]; then
+            PYTHON_EXE="python3"
+        fi
+        
+        $PYTHON_EXE workflow/scripts/validate_checksum.py \
             --vcf {input.vcf} \
             --bed {input.bed} \
             --output {output.report} \
@@ -47,7 +53,13 @@ rule detect_ctx_integration:
         "{output_dir}/{{sample}}/logs/detect_ctx_integration.log".format(output_dir=config["output_dir"])
     shell:
         """
-        python3 workflow/scripts/detect_ctx_integration.py \
+        # Fix for environment activation issue on macOS
+        PYTHON_EXE="$CONDA_PREFIX/bin/python3"
+        if [ ! -f "$PYTHON_EXE" ]; then
+            PYTHON_EXE="python3"
+        fi
+        
+        $PYTHON_EXE workflow/scripts/detect_ctx_integration.py \
             --bam {input.bam} \
             --reference {input.reference} \
             --output {output.report} \
@@ -80,7 +92,13 @@ rule assemble_sxt:
         "{output_dir}/{{sample}}/logs/assemble_sxt.log".format(output_dir=config["output_dir"])
     shell:
         """
-        python3 workflow/scripts/assemble_sxt.py \
+        # Fix for environment activation issue on macOS
+        PYTHON_EXE="$CONDA_PREFIX/bin/python3"
+        if [ ! -f "$PYTHON_EXE" ]; then
+            PYTHON_EXE="python3"
+        fi
+        
+        $PYTHON_EXE workflow/scripts/assemble_sxt.py \
             --bam {input.bam} \
             --reference {input.reference} \
             --output {output.report} \

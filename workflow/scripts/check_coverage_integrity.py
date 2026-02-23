@@ -224,6 +224,8 @@ def main():
             json.dump(results, f, indent=2)
             
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"🚨 Error calculating coverage: {e}")
         # Fail gracefully JSON
         err = {"error": str(e), "status": "ERROR"}
