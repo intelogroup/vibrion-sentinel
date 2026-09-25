@@ -16,6 +16,12 @@ on:
         description: "Comma-separated run accessions to process directly (skips SRA search; for testing/manual runs)"
         required: false
         default: ""
+      force_priority:
+        description: "Priority tag applied to force_accessions (set 'haiti' to also archive raw reads to R2)"
+        required: false
+        default: "global"
+        type: choice
+        options: ["global", "haiti"]
 
 permissions:
   contents: write
@@ -38,10 +44,11 @@ jobs:
         run: |
           if [ -n "${{ inputs.force_accessions }}" ]; then
             echo "Forced accessions: ${{ inputs.force_accessions }}"
-            python3 - "${{ inputs.force_accessions }}" <<'EOF'
+            python3 - "${{ inputs.force_accessions }}" "${{ inputs.force_priority }}" <<'EOF'
           import json, sys
           accs = [a.strip() for a in sys.argv[1].split(",") if a.strip()]
-          json.dump({"include": [{"accession": a} for a in accs]}, open("/tmp/matrix.json", "w"))
+          priority = sys.argv[2] or "global"
+          json.dump({"include": [{"accession": a, "priority": priority} for a in accs]}, open("/tmp/matrix.json", "w"))
           EOF
           else
             python3 scripts/watch_sra.py \
@@ -144,6 +151,26 @@ jobs:
                   f.write(f"{k}: {str(v).lower() if isinstance(v, bool) else repr(v) if isinstance(v, str) else v}\n")
           print(open(f"work/{acc}/config.yaml").read())
           EOF
+
+      - name: Archive raw reads to R2 (Haiti-tier only)
+        if: matrix.priority == 'haiti'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${R2_BUCKET:-}" ]; then
+            echo "R2_BUCKET secret not set — skipping raw-read archive"
+            exit 0
+          fi
+          ACC="${{ matrix.accession }}"
+          for f in "work/${ACC}"/*.fastq.gz; do
+            [ -e "$f" ] || continue
+            aws s3 cp "$f" "s3://${R2_BUCKET}/raw/haiti/${ACC}/$(basename "$f")" \
+              --endpoint-url "$AWS_ENDPOINT_URL"
+          done
 
       - name: Run lite pipeline
         shell: micromamba-shell {0}
