@@ -1,0 +1,361 @@
+# Vibrion Sentinel — lite per-sample pipeline (GitHub Actions tier)
+#
+# Balanced-tier core: QC -> Haiti kraken2 classification -> Vibrio read
+# extraction -> BWA mapping vs 7PET reference -> variant calling ->
+# surveillance-loci coverage -> JSON report.
+#
+# Runs inside the single `sentinel_lite` conda env (tools on PATH).
+# The GitHub workflow writes config.yaml per accession before invoking:
+#   snakemake -s workflow/sentinel_lite/Snakefile --configfile work/<ACC>/config.yaml --cores 2
+
+configfile: "work/config.yaml"  # overridden by --configfile
+
+ACC = config["accession"]
+REFDIR = config["refdir"]
+OUTDIR = config["outdir"]
+PAIRED = config.get("paired", True)
+THREADS = config.get("threads", 2)
+
+REF = f"{REFDIR}/2010EL-1786.fasta"
+KRAKEN_DB = f"{REFDIR}/kraken2_haiti_custom"
+LOCI_BED = f"{REFDIR}/loci.bed"
+
+
+rule all:
+    input:
+        f"{OUTDIR}/report.json",
+
+
+rule fastp_qc:
+    input:
+        r1=config["reads_r1"],
+        r2=config.get("reads_r2", ""),
+    output:
+        r1=f"{OUTDIR}/01_qc/cleaned_1.fastq.gz",
+        r2=f"{OUTDIR}/01_qc/cleaned_2.fastq.gz",
+        json=f"{OUTDIR}/01_qc/fastp.json",
+        html=f"{OUTDIR}/01_qc/fastp.html",
+    threads: THREADS
+    shell:
+        """
+        mkdir -p {OUTDIR}/01_qc
+        if [ "{PAIRED}" = "True" ]; then
+            fastp -i {input.r1} -I {input.r2} \
+                -o {output.r1} -O {output.r2} \
+                -j {output.json} -h {output.html} \
+                -w {threads} --detect_adapter_for_pe \
+                2> {OUTDIR}/01_qc/fastp.log
+        else
+            fastp -i {input.r1} \
+                -o {output.r1} \
+                -j {output.json} -h {output.html} \
+                -w {threads} \
+                2> {OUTDIR}/01_qc/fastp.log
+            touch {output.r2}
+        fi
+        """
+
+
+rule kraken2_classify:
+    input:
+        r1=rules.fastp_qc.output.r1,
+        r2=rules.fastp_qc.output.r2,
+    output:
+        out=f"{OUTDIR}/02_kraken/kraken.out",
+        report=f"{OUTDIR}/02_kraken/kraken.report",
+    params:
+        paired_arg="--paired" if PAIRED else "",
+    threads: THREADS
+    shell:
+        """
+        mkdir -p {OUTDIR}/02_kraken
+        if [ "{PAIRED}" = "True" ]; then
+            kraken2 --db {KRAKEN_DB} --threads {threads} --paired \
+                --output {output.out} --report {output.report} \
+                {input.r1} {input.r2} 2> {OUTDIR}/02_kraken/kraken.log
+        else
+            kraken2 --db {KRAKEN_DB} --threads {threads} \
+                --output {output.out} --report {output.report} \
+                {input.r1} 2> {OUTDIR}/02_kraken/kraken.log
+        fi
+        """
+
+
+rule extract_vibrio:
+    """Keep reads classified as V. cholerae (taxid 666) or unclassified.
+
+    Kraken is the coarse filter; BWA mapping to the cholerae reference
+    downstream is the confirmatory step, so unclassified reads are kept
+    to rescue divergent strains.
+    """
+    input:
+        kraken=rules.kraken2_classify.output.out,
+        r1=rules.fastp_qc.output.r1,
+        r2=rules.fastp_qc.output.r2,
+    output:
+        r1=f"{OUTDIR}/03_vibrio/vibrio_1.fastq.gz",
+        r2=f"{OUTDIR}/03_vibrio/vibrio_2.fastq.gz",
+        stats=f"{OUTDIR}/03_vibrio/extraction_stats.json",
+    run:
+        import gzip, json
+
+        CHOLERAE_TAXID = "666"
+        keep = set()  # read ids (without /1 /2 suffix)
+        n_class, n_keep = 0, 0
+        with open(input.kraken) as fh:
+            for line in fh:
+                parts = line.split("\t")
+                if len(parts) < 3:
+                    continue
+                status, rid, taxid = parts[0], parts[1], parts[2]
+                n_class += 1
+                base = rid.rsplit("/", 1)[0] if "/" in rid else rid
+                if status == "C" and taxid == CHOLERAE_TAXID:
+                    keep.add(base)
+                    n_keep += 1
+                elif status == "U":
+                    keep.add(base)
+                    n_keep += 1
+
+        def filtered(in_path, out_path, suffix):
+            n_in, n_out = 0, 0
+            with gzip.open(in_path, "rt") as fin, gzip.open(out_path, "wt") as fout:
+                while True:
+                    h = fin.readline()
+                    if not h:
+                        break
+                    seq, plus, qual = fin.readline(), fin.readline(), fin.readline()
+                    n_in += 1
+                    base = h[1:].split()[0].rsplit("/", 1)[0]
+                    if base in keep:
+                        fout.write(h + seq + plus + qual)
+                        n_out += 1
+            return n_in, n_out
+
+        import os
+        os.makedirs(f"{OUTDIR}/03_vibrio", exist_ok=True)
+        i1, o1 = filtered(input.r1, output.r1, "1")
+        if PAIRED:
+            i2, o2 = filtered(input.r2, output.r2, "2")
+        else:
+            open(output.r2, "wb").close()  # placeholder; downstream skips R2
+            i2, o2 = 0, 0
+
+        with open(output.stats, "w") as f:
+            json.dump({
+                "kraken_classified": n_class,
+                "kept_for_mapping": n_keep,
+                "r1_in": i1, "r1_kept": o1,
+                "r2_in": i2, "r2_kept": o2,
+                "paired": PAIRED,
+            }, f, indent=2)
+
+
+rule bwa_map:
+    input:
+        r1=rules.extract_vibrio.output.r1,
+        r2=rules.extract_vibrio.output.r2,
+    output:
+        bam=f"{OUTDIR}/04_map/mapped.bam",
+    threads: THREADS
+    shell:
+        """
+        mkdir -p {OUTDIR}/04_map
+        if [ "{PAIRED}" = "True" ]; then
+            bwa mem -t {threads} {REF} {input.r1} {input.r2} 2> {OUTDIR}/04_map/bwa.log \
+                | samtools sort -@ {threads} -o {output.bam}
+        else
+            bwa mem -t {threads} {REF} {input.r1} 2> {OUTDIR}/04_map/bwa.log \
+                | samtools sort -@ {threads} -o {output.bam}
+        fi
+        samtools index {output.bam}
+        """
+
+
+rule coverage_stats:
+    input:
+        bam=rules.bwa_map.output.bam,
+    output:
+        cov=f"{OUTDIR}/04_map/coverage.txt",
+        flag=f"{OUTDIR}/04_map/flagstat.txt",
+    shell:
+        """
+        samtools coverage {input.bam} > {output.cov} 2>/dev/null
+        samtools flagstat {input.bam} > {output.flag}
+        """
+
+
+rule loci_coverage:
+    input:
+        bam=rules.bwa_map.output.bam,
+    output:
+        txt=f"{OUTDIR}/05_loci/loci_coverage.txt",
+    shell:
+        """
+        mkdir -p {OUTDIR}/05_loci
+        samtools coverage -b {LOCI_BED} {input.bam} > {output.txt} 2>/dev/null || \
+            echo "loci coverage failed (check BED)" > {output.txt}
+        """
+
+
+rule call_variants:
+    input:
+        bam=rules.bwa_map.output.bam,
+    output:
+        vcf=f"{OUTDIR}/06_variants/variants.vcf.gz",
+        snp_count=f"{OUTDIR}/06_variants/snp_count.txt",
+    threads: THREADS
+    shell:
+        """
+        mkdir -p {OUTDIR}/06_variants
+        bcftools mpileup -f {REF} --threads {threads} -q 20 -Q 20 \
+            {input.bam} 2>/dev/null | \
+            bcftools call -mv -Oz --threads {threads} -o {output.vcf} 2>/dev/null
+        bcftools index {output.vcf} 2>/dev/null || true
+        bcftools view -v snps {output.vcf} 2>/dev/null | grep -vc "^#" > {output.snp_count} || echo 0 > {output.snp_count}
+        """
+
+
+rule consensus:
+    input:
+        vcf=rules.call_variants.output.vcf,
+    output:
+        fa=f"{OUTDIR}/06_variants/consensus.fasta",
+    shell:
+        """
+        bcftools consensus -f {REF} {input.vcf} > {output.fa} 2>/dev/null || cp {REF} {output.fa}
+        """
+
+
+rule report:
+    input:
+        fastp_json=rules.fastp_qc.output.json,
+        kraken_report=rules.kraken2_classify.output.report,
+        extract_stats=rules.extract_vibrio.output.stats,
+        coverage=rules.coverage_stats.output.cov,
+        flagstat=rules.coverage_stats.output.flag,
+        loci=rules.loci_coverage.output.txt,
+        loci_bed=LOCI_BED,
+        snp_count=rules.call_variants.output.snp_count,
+        consensus=rules.consensus.output.fa,
+    output:
+        json=f"{OUTDIR}/report.json",
+    run:
+        import json as _json, os, re, subprocess
+
+        def load_json(p):
+            with open(p) as f:
+                return _json.load(f)
+
+        fp = load_json(input.fastp_json)
+        before = fp["summary"]["before_filtering"]["total_reads"]
+        after = fp["summary"]["after_filtering"]["total_reads"]
+
+        # kraken: V. cholerae (taxid 666) fraction from report
+        cholerae_reads, total_kraken = 0, 0
+        with open(input.kraken_report) as f:
+            for line in f:
+                parts = line.strip().split("\t")
+                if len(parts) >= 6:
+                    pct, n_reads, taxid, name = parts[0], parts[1], parts[4], parts[5].strip()
+                    try:
+                        total_kraken = max(total_kraken, int(n_reads))
+                    except ValueError:
+                        pass
+                    if taxid == "666":
+                        cholerae_reads = int(n_reads)
+
+        ex = load_json(input.extract_stats)
+
+        # genome-wide coverage: mean depth + breadth from samtools coverage
+        mean_depth, breadth = 0.0, 0.0
+        with open(input.coverage) as f:
+            for line in f:
+                if line.startswith("#rname"):
+                    continue
+                p = line.strip().split("\t")
+                if len(p) >= 7:
+                    try:
+                        mean_depth = float(p[6])
+                        breadth = float(p[5])
+                    except ValueError:
+                        pass
+                    break
+
+        mapped = 0
+        m = re.search(r"(\d+) \+ \d+ mapped", open(input.flagstat).read())
+        if m:
+            mapped = int(m.group(1))
+
+        # loci presence: match BED intervals by coordinates (samtools coverage
+        # -b prints rname/startpos/endpos, not the BED name). Depth >= 5x
+        # over >= 80% of locus = present.
+        bed_labels = {}
+        with open(input.loci_bed) as f:
+            for line in f:
+                if not line.strip() or line.startswith("#"):
+                    continue
+                p = line.strip().split("\t")
+                # BED is 0-based; samtools coverage startpos is 1-based
+                bed_labels[(p[0], int(p[1]) + 1, int(p[2]))] = p[3]
+        loci_calls = {}
+        with open(input.loci) as f:
+            for line in f:
+                if line.startswith("#rname") or not line.strip() or "failed" in line:
+                    continue
+                p = line.strip().split("\t")
+                if len(p) >= 7:
+                    try:
+                        key = (p[0], int(p[1]), int(p[2]))
+                        depth, cov = float(p[6]), float(p[5])
+                    except ValueError:
+                        continue
+                    name = bed_labels.get(key, f"{p[0]}:{p[1]}-{p[2]}")
+                    loci_calls[name] = {
+                        "mean_depth": round(depth, 2),
+                        "breadth_pct": round(cov, 2),
+                        "present": bool(depth >= 5 and cov >= 80),
+                    }
+
+        try:
+            snps = int(open(input.snp_count).read().strip())
+        except ValueError:
+            snps = 0
+
+        cons_len = 0
+        with open(input.consensus) as f:
+            for line in f:
+                if not line.startswith(">"):
+                    cons_len += len(line.strip())
+
+        report = {
+            "pipeline": "vibrion-sentinel-lite",
+            "version": "0.1.0",
+            "accession": ACC,
+            "reference": "2010EL-1786 (7PET, CP003069.1/CP003070.1)",
+            "reads": {
+                "raw": before,
+                "qc_passed": after,
+                "vibrio_kept": ex["kept_for_mapping"],
+            },
+            "classification": {
+                "kraken_db": "kraken2_haiti_custom",
+                "v_cholerae_reads": cholerae_reads,
+                "v_cholerae_fraction": round(cholerae_reads / total_kraken, 4) if total_kraken else 0.0,
+            },
+            "mapping": {
+                "mapped_reads": mapped,
+                "mean_depth": round(mean_depth, 2),
+                "breadth_pct": round(breadth, 2),
+            },
+            "variants": {"snps_vs_7pet": snps},
+            "surveillance_loci": loci_calls,
+            "consensus_length": cons_len,
+            "notes": "Lite tier: mapping-based, no de novo assembly. "
+                     "Serogroup/biotype inferred from loci presence; "
+                     "confirm novel signals with full pipeline.",
+        }
+        os.makedirs(OUTDIR, exist_ok=True)
+        with open(output.json, "w") as f:
+            _json.dump(report, f, indent=2)
+        print(_json.dumps(report, indent=2)[:2000])

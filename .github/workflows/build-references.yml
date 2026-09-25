@@ -1,0 +1,74 @@
+name: Build sentinel reference bundle
+
+# One-time (re-run when references change): builds the Haiti kraken2 DB,
+# serogroup DB, 7PET reference + BWA index, and surveillance-loci BED,
+# then publishes them as a GitHub Release asset consumed by sentinel-watch.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          micromamba-version: "latest"
+          environment-file: workflow/envs/sentinel_lite.yaml
+          cache-environment: true
+          environment-name: sentinel-lite
+
+      - name: Build reference bundle
+        shell: micromamba-shell {0}
+        run: |
+          set -euo pipefail
+          mkdir -p refs_build && cd refs_build
+
+          echo "▶ Fetching 2010EL-1786 (fasta + genbank)..."
+          curl -sL "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id=CP003069.1&rettype=fasta&retmode=text" -o chr1.fa
+          curl -sL "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id=CP003070.1&rettype=fasta&retmode=text" -o chr2.fa
+          cat chr1.fa chr2.fa > 2010EL-1786.fasta
+          curl -sL "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id=CP003069.1&rettype=gb&retmode=text" -o 2010EL-1786.gb
+          head -c 1 2010EL-1786.fasta | grep -q ">" || { echo "fasta fetch failed"; exit 1; }
+
+          echo "▶ Fetching Haiti 2022 resurgence reference..."
+          curl -sL "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id=OQ860440.1&rettype=fasta&retmode=text" -o Haiti_2022_Resurgence.fasta
+
+          echo "▶ BWA index..."
+          bwa index 2010EL-1786.fasta
+
+          echo "▶ Haiti custom kraken2 DB..."
+          bash ../scripts/build_haiti_kraken_db.sh kraken2_haiti_custom 2
+
+          echo "▶ Serogroup kraken2 DB (O1 seed; extend with O139 refs as available)..."
+          mkdir -p kraken2_serogroup
+          kraken2-build --download-taxonomy --db kraken2_serogroup
+          kraken2-build --add-to-library 2010EL-1786.fasta --db kraken2_serogroup
+          kraken2-build --build --db kraken2_serogroup --threads 2
+
+          echo "▶ Surveillance loci BED from GenBank annotations..."
+          python3 ../scripts/extract_loci_bed.py --genbank 2010EL-1786.gb --out loci.bed
+          wc -l loci.bed
+
+          echo "▶ Packaging..."
+          tar -czf ../sentinel-refs-v1.tar.gz \
+            2010EL-1786.fasta 2010EL-1786.fasta.bwt 2010EL-1786.fasta.pac \
+            2010EL-1786.fasta.ann 2010EL-1786.fasta.amb 2010EL-1786.fasta.sa \
+            Haiti_2022_Resurgence.fasta \
+            kraken2_haiti_custom kraken2_serogroup loci.bed
+          du -sh ../sentinel-refs-v1.tar.gz
+
+      - name: Publish release asset
+        run: |
+          gh release delete sentinel-refs-v1 --yes 2>/dev/null || true
+          gh release create sentinel-refs-v1 sentinel-refs-v1.tar.gz \
+            --title "Sentinel reference bundle v1" \
+            --notes "Haiti kraken2 DB, serogroup DB, 2010EL-1786 + BWA index, surveillance loci BED. Built by build-references.yml."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
