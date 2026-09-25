@@ -190,12 +190,34 @@ rule loci_coverage:
         bam=rules.bwa_map.output.bam,
     output:
         txt=f"{OUTDIR}/05_loci/loci_coverage.txt",
-    shell:
-        """
-        mkdir -p {OUTDIR}/05_loci
-        samtools coverage -b {LOCI_BED} {input.bam} > {output.txt} 2>/dev/null || \
-            echo "loci coverage failed (check BED)" > {output.txt}
-        """
+    run:
+        # Per-locus coverage via `samtools coverage -r` (samtools coverage
+        # has no BED input mode). Output keeps the samtools-coverage table
+        # format the report rule parses.
+        import os
+        import subprocess
+
+        os.makedirs(f"{OUTDIR}/05_loci", exist_ok=True)
+        header = ("#rname\tstartpos\tendpos\tnumreads\tcovbases\t"
+                  "coverage\tmeandepth\tmeanbaseq\tmeanmapq\n")
+        rows = []
+        with open(LOCI_BED) as fh:
+            for line in fh:
+                if not line.strip() or line.startswith("#"):
+                    continue
+                p = line.rstrip("\n").split("\t")
+                region = f"{p[0]}:{int(p[1]) + 1}-{p[2]}"
+                r = subprocess.run(
+                    ["samtools", "coverage", "-r", region, input.bam],
+                    capture_output=True, text=True)
+                for ln in r.stdout.splitlines():
+                    if ln.startswith("#rname") or not ln.strip():
+                        continue
+                    rows.append(ln)
+        with open(output.txt, "w") as out:
+            out.write(header)
+            for ln in rows:
+                out.write(ln + "\n")
 
 
 rule call_variants:
@@ -288,7 +310,7 @@ rule report:
             mapped = int(m.group(1))
 
         # loci presence: match BED intervals by coordinates (samtools coverage
-        # -b prints rname/startpos/endpos, not the BED name). Depth >= 5x
+        # -r prints rname/startpos/endpos, not the BED name). Depth >= 5x
         # over >= 80% of locus = present.
         bed_labels = {}
         with open(input.loci_bed) as f:
