@@ -30,6 +30,14 @@ declare -A GENOMES=(
   ["U00096.3"]="decoy_ecoli_K12"
 )
 
+# accession -> NCBI taxid (embedded in fasta headers as |kraken:taxid| so that
+# kraken2-build needs no accession2taxid map files)
+declare -A TAXIDS=(
+  ["CP003069.1"]=666 ["CP003070.1"]=666
+  ["AE003852.1"]=666 ["AE003853.1"]=666
+  ["U00096.3"]=562
+)
+
 echo "▶ Fetching ${#GENOMES[@]} reference sequences..."
 mkdir -p "$OUT_DIR/library/added"
 for acc in "${!GENOMES[@]}"; do
@@ -39,6 +47,8 @@ for acc in "${!GENOMES[@]}"; do
     -o "$WORKDIR/${label}.fasta"
   # sanity: must look like fasta
   head -c 1 "$WORKDIR/${label}.fasta" | grep -q ">" || { echo "  ✗ failed to fetch $acc"; exit 1; }
+  # embed taxid: lets kraken2-build skip the multi-GB accession2taxid maps
+  sed -i -E "1s/^(>\\S+)/\\1|kraken:taxid|${TAXIDS[$acc]}/" "$WORKDIR/${label}.fasta"
   kraken2-build --add-to-library "$WORKDIR/${label}.fasta" --db "$OUT_DIR" >/dev/null
 done
 
