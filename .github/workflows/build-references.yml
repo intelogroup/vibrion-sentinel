@@ -52,8 +52,11 @@ jobs:
           # HTTPS: kraken2-build --download-taxonomy uses rsync, blocked on CI runners
           curl -sL "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz" -o taxdump.tar.gz
           tar -xzf taxdump.tar.gz -C kraken2_serogroup/taxonomy
-          sed -i -E 's/^(>\S+)/\1|kraken:taxid|666/' 2010EL-1786.fasta
-          kraken2-build --add-to-library 2010EL-1786.fasta --db kraken2_serogroup
+          # copy first: the taxid tag must not leak into the packaged fasta
+          # (bwa rebuilds its index when the fasta is newer, changing @SQ names)
+          cp 2010EL-1786.fasta serogroup_src.fasta
+          sed -i -E 's/^(>\S+)/\1|kraken:taxid|666/' serogroup_src.fasta
+          kraken2-build --add-to-library serogroup_src.fasta --db kraken2_serogroup
           kraken2-build --build --db kraken2_serogroup --threads 2
 
           echo "▶ Surveillance loci BED from GenBank annotations..."
