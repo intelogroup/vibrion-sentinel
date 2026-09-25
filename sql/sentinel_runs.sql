@@ -32,6 +32,10 @@ create table if not exists sentinel_runs (
 
     snps_vs_7pet         integer,
     consensus_length     integer,
+    consensus_called_pct numeric,   -- % of reference not masked (depth >= min_site_depth)
+
+    qc_status            text,      -- 'pass' | 'fail': filter on this before using variants/loci
+    qc_reasons           jsonb,
 
     surveillance_loci    jsonb,   -- {locus_name: {mean_depth, breadth_pct, present}}
     report                jsonb,   -- full report.json, kept verbatim for anything not modeled above
@@ -39,6 +43,12 @@ create table if not exists sentinel_runs (
     created_at           timestamptz not null default now()
 );
 
+-- for tables created before the QC columns existed
+alter table sentinel_runs add column if not exists consensus_called_pct numeric;
+alter table sentinel_runs add column if not exists qc_status text;
+alter table sentinel_runs add column if not exists qc_reasons jsonb;
+
+create index if not exists sentinel_runs_qc_status_idx on sentinel_runs (qc_status);
 create index if not exists sentinel_runs_priority_idx on sentinel_runs (priority);
 create index if not exists sentinel_runs_run_at_idx on sentinel_runs (run_at desc);
 
@@ -47,6 +57,7 @@ create index if not exists sentinel_runs_run_at_idx on sentinel_runs (run_at des
 -- e.g. an anon/authenticated dashboard to query this directly.
 alter table sentinel_runs enable row level security;
 
+drop policy if exists "sentinel_runs read access" on sentinel_runs;
 create policy "sentinel_runs read access"
     on sentinel_runs for select
     using (true);

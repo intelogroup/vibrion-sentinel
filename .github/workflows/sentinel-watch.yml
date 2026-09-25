@@ -183,6 +183,15 @@ jobs:
             --cores 2 --printshellcmds
           echo "=== report ==="
           cat "results/${ACC}/report.json"
+          # QC fail is a data verdict, not a pipeline error: keep the job green
+          # (artifacts stay inspectable) but surface it in the run summary.
+          python3 - "$ACC" <<'EOF'
+          import json, sys
+          acc = sys.argv[1]
+          qc = json.load(open(f"results/{acc}/report.json"))["qc"]
+          if qc["status"] != "pass":
+              print(f"::warning title=QC fail {acc}::" + "; ".join(qc["reasons"]))
+          EOF
 
       - name: Push report to Supabase
         env:
@@ -215,6 +224,9 @@ jobs:
               "breadth_pct": r.get("mapping", {}).get("breadth_pct"),
               "snps_vs_7pet": r.get("variants", {}).get("snps_vs_7pet"),
               "consensus_length": r.get("consensus_length"),
+              "consensus_called_pct": r.get("consensus_called_pct"),
+              "qc_status": r.get("qc", {}).get("status"),
+              "qc_reasons": r.get("qc", {}).get("reasons"),
               "surveillance_loci": r.get("surveillance_loci"),
               "report": r,
           }

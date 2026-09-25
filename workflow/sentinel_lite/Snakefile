@@ -16,6 +16,12 @@ OUTDIR = config["outdir"]
 PAIRED = config.get("paired", True)
 THREADS = config.get("threads", 2)
 
+# QC thresholds. Provisional defaults: no organism-specific published
+# standard was found for V. cholerae mapping QC; tune against known-good runs.
+MIN_SITE_DEPTH = config.get("min_site_depth", 10)        # per-position: below -> N in consensus, no variant call
+QC_MIN_MEAN_DEPTH = config.get("qc_min_mean_depth", 20)  # genome-wide mean depth
+QC_MIN_CALLED_PCT = config.get("qc_min_called_pct", 90)  # % of reference called (not masked)
+
 REF = f"{REFDIR}/2010EL-1786.fasta"
 KRAKEN_DB = f"{REFDIR}/kraken2_haiti_custom"
 LOCI_BED = f"{REFDIR}/loci.bed"
@@ -221,31 +227,65 @@ rule loci_coverage:
 
 
 rule call_variants:
+    """Haploid calling (V. cholerae is haploid; bcftools defaults to diploid),
+    then keep only sites with QUAL >= 30 and depth >= MIN_SITE_DEPTH."""
     input:
         bam=rules.bwa_map.output.bam,
     output:
+        raw=f"{OUTDIR}/06_variants/variants.raw.vcf.gz",
         vcf=f"{OUTDIR}/06_variants/variants.vcf.gz",
         snp_count=f"{OUTDIR}/06_variants/snp_count.txt",
+    log:
+        f"{OUTDIR}/06_variants/bcftools.log",
     threads: THREADS
     shell:
         """
         mkdir -p {OUTDIR}/06_variants
         bcftools mpileup -f {REF} --threads {threads} -q 20 -Q 20 \
-            {input.bam} 2>/dev/null | \
-            bcftools call -mv -Oz --threads {threads} -o {output.vcf} 2>/dev/null
-        bcftools index {output.vcf} 2>/dev/null || true
-        bcftools view -v snps {output.vcf} 2>/dev/null | grep -vc "^#" > {output.snp_count} || echo 0 > {output.snp_count}
+            {input.bam} 2> {log} | \
+            bcftools call --ploidy 1 -mv -Oz --threads {threads} \
+            -o {output.raw} 2>> {log}
+        bcftools filter -i 'QUAL>=30 && INFO/DP>={MIN_SITE_DEPTH}' \
+            -Oz -o {output.vcf} {output.raw} 2>> {log}
+        bcftools index -f {output.vcf} 2>> {log}
+        bcftools view -H -v snps {output.vcf} | wc -l > {output.snp_count}
+        """
+
+
+rule depth_mask:
+    """BED of positions with depth < MIN_SITE_DEPTH (incl. contigs with no
+    reads at all), masked to N in the consensus so uncovered sequence is
+    never reported as the reference base."""
+    input:
+        bam=rules.bwa_map.output.bam,
+    output:
+        bed=f"{OUTDIR}/06_variants/low_depth_mask.bed",
+    shell:
+        """
+        samtools depth -aa -q 20 -Q 20 {input.bam} | \
+            awk -v m={MIN_SITE_DEPTH} 'BEGIN{{OFS="\\t"}}
+                $3 < m {{
+                    if ($1 == c && $2 == e + 1) {{ e = $2 }}
+                    else {{ if (c != "") print c, s - 1, e; c = $1; s = $2; e = $2 }}
+                    next
+                }}
+                {{ if (c != "") print c, s - 1, e; c = "" }}
+                END {{ if (c != "") print c, s - 1, e }}' > {output.bed}
         """
 
 
 rule consensus:
     input:
         vcf=rules.call_variants.output.vcf,
+        mask=rules.depth_mask.output.bed,
     output:
         fa=f"{OUTDIR}/06_variants/consensus.fasta",
+    log:
+        f"{OUTDIR}/06_variants/consensus.log",
     shell:
         """
-        bcftools consensus -f {REF} {input.vcf} > {output.fa} 2>/dev/null || cp {REF} {output.fa}
+        bcftools consensus -f {REF} -m {input.mask} {input.vcf} \
+            > {output.fa} 2> {log}
         """
 
 
@@ -289,8 +329,9 @@ rule report:
 
         ex = load_json(input.extract_stats)
 
-        # genome-wide coverage: mean depth + breadth from samtools coverage
-        mean_depth, breadth = 0.0, 0.0
+        # genome-wide coverage: length-weighted over all contigs (chr1 + chr2)
+        # from samtools coverage rows (startpos, endpos, covbases, meandepth)
+        tot_len, tot_cov, depth_sum = 0, 0, 0.0
         with open(input.coverage) as f:
             for line in f:
                 if line.startswith("#rname"):
@@ -298,11 +339,14 @@ rule report:
                 p = line.strip().split("\t")
                 if len(p) >= 7:
                     try:
-                        mean_depth = float(p[6])
-                        breadth = float(p[5])
+                        length = int(p[2]) - int(p[1]) + 1
+                        tot_len += length
+                        tot_cov += int(p[4])
+                        depth_sum += float(p[6]) * length
                     except ValueError:
                         pass
-                    break
+        mean_depth = depth_sum / tot_len if tot_len else 0.0
+        breadth = 100.0 * tot_cov / tot_len if tot_len else 0.0
 
         mapped = 0
         m = re.search(r"(\d+) \+ \d+ mapped", open(input.flagstat).read())
@@ -344,11 +388,22 @@ rule report:
         except ValueError:
             snps = 0
 
-        cons_len = 0
+        cons_len, cons_n = 0, 0
         with open(input.consensus) as f:
             for line in f:
                 if not line.startswith(">"):
-                    cons_len += len(line.strip())
+                    seq = line.strip()
+                    cons_len += len(seq)
+                    cons_n += seq.upper().count("N")
+        called_pct = 100.0 * (cons_len - cons_n) / cons_len if cons_len else 0.0
+
+        # QC gate: a failing run still gets a report (for inspection), but its
+        # variants/consensus/loci calls must not be treated as results.
+        qc_reasons = []
+        if mean_depth < QC_MIN_MEAN_DEPTH:
+            qc_reasons.append(f"mean_depth {mean_depth:.2f} < {QC_MIN_MEAN_DEPTH}")
+        if called_pct < QC_MIN_CALLED_PCT:
+            qc_reasons.append(f"called_pct {called_pct:.2f} < {QC_MIN_CALLED_PCT}")
 
         report = {
             "pipeline": "vibrion-sentinel-lite",
@@ -373,9 +428,21 @@ rule report:
             "variants": {"snps_vs_7pet": snps},
             "surveillance_loci": loci_calls,
             "consensus_length": cons_len,
+            "consensus_called_pct": round(called_pct, 2),
+            "qc": {
+                "status": "fail" if qc_reasons else "pass",
+                "reasons": qc_reasons,
+                "thresholds": {
+                    "min_site_depth": MIN_SITE_DEPTH,
+                    "min_mean_depth": QC_MIN_MEAN_DEPTH,
+                    "min_called_pct": QC_MIN_CALLED_PCT,
+                },
+            },
             "notes": "Lite tier: mapping-based, no de novo assembly. "
-                     "Serogroup/biotype inferred from loci presence; "
-                     "confirm novel signals with full pipeline.",
+                     "Consensus positions below min_site_depth are N. "
+                     "If qc.status is 'fail', variants, consensus and loci "
+                     "calls are not interpretable. Loci BED is provisional "
+                     "and does not yet support serogroup/biotype calls.",
         }
         os.makedirs(OUTDIR, exist_ok=True)
         with open(output.json, "w") as f:
