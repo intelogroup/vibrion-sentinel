@@ -29,7 +29,7 @@ rule all:
 rule fastp_qc:
     input:
         r1=config["reads_r1"],
-        r2=config.get("reads_r2", ""),
+        r2=config["reads_r2"] if PAIRED else [],
     output:
         r1=f"{OUTDIR}/01_qc/cleaned_1.fastq.gz",
         r2=f"{OUTDIR}/01_qc/cleaned_2.fastq.gz",

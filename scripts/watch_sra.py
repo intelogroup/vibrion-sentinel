@@ -16,6 +16,7 @@ Usage:
 
 import argparse
 import json
+import re
 import sys
 import time
 import urllib.parse
@@ -69,12 +70,11 @@ def summarize_run_ids(ids):
         chunk = ids[i:i + 200]
         root = eu_xml("esummary.fcgi", {"db": "sra", "id": ",".join(chunk)})
         for doc in root.iter("DocSum"):
-            acc = None
+            # Runs are in a "Runs" item as escaped XML: <Run acc="SRR..." .../>
+            # (one experiment may carry several runs)
             for item in doc.iter("Item"):
-                if item.get("Name") == "Run":
-                    acc = (item.text or "").strip()
-            if acc:
-                accs.append(acc)
+                if item.get("Name") == "Runs":
+                    accs.extend(re.findall(r'<Run acc="([^"]+)"', item.text or ""))
         time.sleep(0.4)
     return accs
 
