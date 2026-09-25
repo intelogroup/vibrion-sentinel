@@ -1,0 +1,187 @@
+name: Vibrion sentinel watch
+
+# Watches NCBI SRA for new Vibrio cholerae accessions, runs the lite
+# per-sample pipeline on each (GitHub-hosted runners, balanced tier),
+# and records processed accessions in state/seen_accessions.txt.
+#
+# Setup order: run build-references.yml once first (publishes the
+# sentinel-refs-v1 release asset this workflow downloads).
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"  # every 6 hours
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sentinel-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.emit.outputs.matrix }}
+      new_count: ${{ steps.emit.outputs.new_count }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find new accessions
+        id: emit
+        run: |
+          python3 scripts/watch_sra.py \
+            --state state/seen_accessions.txt \
+            --days 7 --max-new 10 \
+            --out-matrix /tmp/matrix.json
+          COUNT=$(python3 -c "import json; print(len(json.load(open('/tmp/matrix.json'))['include']))")
+          echo "matrix=$(cat /tmp/matrix.json)" >> "$GITHUB_OUTPUT"
+          echo "new_count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "New accessions: $COUNT"
+
+  process:
+    needs: watch
+    if: needs.watch.outputs.new_count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJson(needs.watch.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download reference bundle
+        run: |
+          gh release download sentinel-refs-v1 \
+            --pattern "sentinel-refs-v1.tar.gz" --dir /tmp
+          mkdir -p refs && tar -xzf /tmp/sentinel-refs-v1.tar.gz -C refs
+          ls refs/
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          micromamba-version: "latest"
+          environment-file: workflow/envs/sentinel_lite.yaml
+          cache-environment: true
+          environment-name: sentinel-lite
+
+      - name: Download reads (ENA, fallback SRA Toolkit)
+        shell: micromamba-shell {0}
+        run: |
+          set -euo pipefail
+          ROOT="$PWD"
+          ACC="${{ matrix.accession }}"
+          mkdir -p "work/${ACC}"
+          META=$(curl -s "https://www.ebi.ac.uk/ena/portal/api/filereport?accession=${ACC}&result=read_run&fields=run_accession,fastq_ftp,library_layout&format=json")
+          LAYOUT=$(ACC="$ACC" META="$META" python3 - <<'EOF'
+          import json, os
+          d = json.loads(os.environ["META"])
+          if not d:
+              print("MISSING")
+          else:
+              r = d[0]
+              print(r.get("library_layout", "PAIRED"))
+              with open(f"work/{os.environ['ACC']}/ena.json", "w") as f:
+                  json.dump(r, f)
+          EOF
+          )
+          if [ "$LAYOUT" = "MISSING" ]; then
+            echo "No ENA record for $ACC — trying SRA Toolkit"
+            cd "work/${ACC}"
+            fasterq-dump "$ACC" --threads 2 --progress
+            ls ${ACC}*.fastq | head
+            gzip -1 ${ACC}*.fastq
+            if [ -f "${ACC}_2.fastq.gz" ]; then PAIRED=true; else PAIRED=false; fi
+            R1="$(ls ${ACC}_1.fastq.gz 2>/dev/null || ls ${ACC}.fastq.gz)"
+            R2="$(ls ${ACC}_2.fastq.gz 2>/dev/null || echo '')"
+            cd "$ROOT"
+          else
+            PAIRED="true"; [ "$LAYOUT" = "SINGLE" ] && PAIRED="false"
+            URLS=$(python3 -c "import json; print(json.load(open('work/${ACC}/ena.json'))['fastq_ftp'])")
+            i=1
+            for u in $(echo "$URLS" | tr ';' ' '); do
+              curl -sL --retry 3 -o "work/${ACC}/reads_${i}.fastq.gz" "https://${u}"
+              i=$((i+1))
+            done
+            R1="work/${ACC}/reads_1.fastq.gz"
+            R2="work/${ACC}/reads_2.fastq.gz"
+            [ "$PAIRED" = "false" ] && R2=""
+          fi
+          # resolve to absolute paths for snakemake
+          R1="$(cd "$(dirname "$R1")" && pwd)/$(basename "$R1")"
+          [ -n "$R2" ] && R2="$(cd "$(dirname "$R2")" && pwd)/$(basename "$R2")"
+          python3 - "$ACC" "$PAIRED" "$R1" "$R2" <<'EOF'
+          import sys
+          acc, paired, r1, r2 = sys.argv[1], sys.argv[2] == "true", sys.argv[3], sys.argv[4]
+          cfg = {
+              "accession": acc,
+              "paired": paired,
+              "reads_r1": r1,
+              "reads_r2": r2,
+              "refdir": "refs",
+              "outdir": f"results/{acc}",
+              "threads": 2,
+          }
+          with open(f"work/{acc}/config.yaml", "w") as f:
+              for k, v in cfg.items():
+                  f.write(f"{k}: {str(v).lower() if isinstance(v, bool) else repr(v) if isinstance(v, str) else v}\n")
+          print(open(f"work/{acc}/config.yaml").read())
+          EOF
+
+      - name: Run lite pipeline
+        shell: micromamba-shell {0}
+        run: |
+          set -euo pipefail
+          ACC="${{ matrix.accession }}"
+          micromamba run -n sentinel-lite snakemake \
+            -s workflow/sentinel_lite/Snakefile \
+            --configfile "work/${ACC}/config.yaml" \
+            --cores 2 --printshellcmds
+          echo "=== report ==="
+          cat "results/${ACC}/report.json"
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentinel-${{ matrix.accession }}
+          path: |
+            results/${{ matrix.accession }}/report.json
+            results/${{ matrix.accession }}/06_variants/consensus.fasta
+            results/${{ matrix.accession }}/05_loci/loci_coverage.txt
+          if-no-files-found: error
+          retention-days: 90
+
+  record:
+    needs: [watch, process]
+    if: always() && needs.watch.outputs.new_count != '0' && needs.process.result != 'cancelled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record processed accessions
+        run: |
+          git config user.name "vibrion-sentinel-bot"
+          git config user.email "vibrion-sentinel-bot@users.noreply.github.com"
+          git pull --rebase --autostash || true
+          python3 - <<'EOF'
+          import json, os
+          matrix = json.loads(os.environ["MATRIX_JSON"])
+          seen = set()
+          try:
+              with open("state/seen_accessions.txt") as f:
+                  seen = {l.strip() for l in f if l.strip() and not l.startswith("#")}
+          except FileNotFoundError:
+              pass
+          new = [i["accession"] for i in matrix["include"] if i["accession"] not in seen]
+          with open("state/seen_accessions.txt", "a") as f:
+              for acc in new:
+                  f.write(acc + "\n")
+          print(f"recorded {len(new)} accessions")
+          EOF
+          git add state/seen_accessions.txt
+          git diff --cached --quiet || git commit -m "sentinel: processed accessions $(date -u +%F)"
+          git push
+        env:
+          MATRIX_JSON: ${{ needs.watch.outputs.matrix }}
