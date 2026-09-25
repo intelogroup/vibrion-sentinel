@@ -11,6 +11,11 @@ on:
   schedule:
     - cron: "17 */6 * * *"  # every 6 hours
   workflow_dispatch:
+    inputs:
+      force_accessions:
+        description: "Comma-separated run accessions to process directly (skips SRA search; for testing/manual runs)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -31,10 +36,19 @@ jobs:
       - name: Find new accessions
         id: emit
         run: |
-          python3 scripts/watch_sra.py \
-            --state state/seen_accessions.txt \
-            --days 7 --max-new 10 \
-            --out-matrix /tmp/matrix.json
+          if [ -n "${{ inputs.force_accessions }}" ]; then
+            echo "Forced accessions: ${{ inputs.force_accessions }}"
+            python3 - "${{ inputs.force_accessions }}" <<'EOF'
+          import json, sys
+          accs = [a.strip() for a in sys.argv[1].split(",") if a.strip()]
+          json.dump({"include": [{"accession": a} for a in accs]}, open("/tmp/matrix.json", "w"))
+          EOF
+          else
+            python3 scripts/watch_sra.py \
+              --state state/seen_accessions.txt \
+              --days 7 --max-new 10 \
+              --out-matrix /tmp/matrix.json
+          fi
           COUNT=$(python3 -c "import json; print(len(json.load(open('/tmp/matrix.json'))['include']))")
           echo "matrix=$(cat /tmp/matrix.json)" >> "$GITHUB_OUTPUT"
           echo "new_count=$COUNT" >> "$GITHUB_OUTPUT"
