@@ -70,6 +70,10 @@ def parse_genbank(path):
         for line in fh:
             if line.startswith("LOCUS"):
                 seq_id = line.split()[1]
+            elif line.startswith("VERSION"):
+                # versioned accession (CP003069.1) matches the fasta/BAM
+                # reference names; LOCUS alone lacks the version suffix
+                seq_id = line.split()[1]
             elif line.startswith("FEATURES"):
                 in_features = True
             elif line.startswith("ORIGIN"):
