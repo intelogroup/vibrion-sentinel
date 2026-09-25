@@ -184,6 +184,50 @@ jobs:
           echo "=== report ==="
           cat "results/${ACC}/report.json"
 
+      - name: Push report to Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY not set -- skipping metrics push"
+            exit 0
+          fi
+          python3 - "${{ matrix.accession }}" "${{ matrix.priority }}" <<'EOF' > /tmp/sentinel_row.json
+          import json, sys
+          acc, priority = sys.argv[1], sys.argv[2] or None
+          with open(f"results/{acc}/report.json") as f:
+              r = json.load(f)
+          row = {
+              "accession": r["accession"],
+              "priority": priority,
+              "pipeline_version": r.get("version"),
+              "reference": r.get("reference"),
+              "reads_raw": r.get("reads", {}).get("raw"),
+              "reads_qc_passed": r.get("reads", {}).get("qc_passed"),
+              "reads_vibrio_kept": r.get("reads", {}).get("vibrio_kept"),
+              "kraken_db": r.get("classification", {}).get("kraken_db"),
+              "v_cholerae_reads": r.get("classification", {}).get("v_cholerae_reads"),
+              "v_cholerae_fraction": r.get("classification", {}).get("v_cholerae_fraction"),
+              "mapped_reads": r.get("mapping", {}).get("mapped_reads"),
+              "mean_depth": r.get("mapping", {}).get("mean_depth"),
+              "breadth_pct": r.get("mapping", {}).get("breadth_pct"),
+              "snps_vs_7pet": r.get("variants", {}).get("snps_vs_7pet"),
+              "consensus_length": r.get("consensus_length"),
+              "surveillance_loci": r.get("surveillance_loci"),
+              "report": r,
+          }
+          json.dump(row, sys.stdout)
+          EOF
+          curl -sS --fail-with-body -X POST \
+            "${SUPABASE_URL}/rest/v1/sentinel_runs" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: resolution=merge-duplicates" \
+            --data @/tmp/sentinel_row.json
+
       - name: Upload results
         uses: actions/upload-artifact@v4
         with:
