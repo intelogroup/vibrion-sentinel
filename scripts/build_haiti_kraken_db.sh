@@ -42,8 +42,10 @@ for acc in "${!GENOMES[@]}"; do
   kraken2-build --add-to-library "$WORKDIR/${label}.fasta" --db "$OUT_DIR" >/dev/null
 done
 
-echo "▶ Downloading taxonomy..."
-kraken2-build --download-taxonomy --db "$OUT_DIR" >/dev/null
+echo "▶ Downloading taxonomy (HTTPS: rsync is blocked on CI runners)..."
+mkdir -p "$OUT_DIR/taxonomy"
+curl -sL "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz" -o "$WORKDIR/taxdump.tar.gz"
+tar -xzf "$WORKDIR/taxdump.tar.gz" -C "$OUT_DIR/taxonomy"
 
 echo "▶ Building database ($THREADS threads)..."
 kraken2-build --build --db "$OUT_DIR" --threads "$THREADS"
