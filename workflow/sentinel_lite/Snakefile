@@ -10,6 +10,10 @@
 
 configfile: "work/config.yaml"  # overridden by --configfile
 
+import sys as _sys
+_sys.path.insert(0, workflow.basedir)
+import report_lib
+
 ACC = config["accession"]
 REFDIR = config["refdir"]
 OUTDIR = config["outdir"]
@@ -259,7 +263,9 @@ rule call_variants:
 rule depth_mask:
     """BED of positions with depth < MIN_SITE_DEPTH (incl. contigs with no
     reads at all), masked to N in the consensus so uncovered sequence is
-    never reported as the reference base."""
+    never reported as the reference base. Merge logic lives in
+    scripts/depth_mask.awk (tested independently; see
+    tests/sentinel_lite/test_depth_mask_awk.py)."""
     input:
         bam=rules.bwa_map.output.bam,
     output:
@@ -267,14 +273,8 @@ rule depth_mask:
     shell:
         """
         samtools depth -aa -q 20 -Q 20 {input.bam} | \
-            awk -v m={MIN_SITE_DEPTH} 'BEGIN{{OFS="\\t"}}
-                $3 < m {{
-                    if ($1 == c && $2 == e + 1) {{ e = $2 }}
-                    else {{ if (c != "") print c, s - 1, e; c = $1; s = $2; e = $2 }}
-                    next
-                }}
-                {{ if (c != "") print c, s - 1, e; c = "" }}
-                END {{ if (c != "") print c, s - 1, e }}' > {output.bed}
+            awk -v m={MIN_SITE_DEPTH} -f {workflow.basedir}/scripts/depth_mask.awk \
+            > {output.bed}
         """
 
 
@@ -319,7 +319,7 @@ rule report:
     output:
         json=f"{OUTDIR}/report.json",
     run:
-        import json as _json, os, re, subprocess
+        import json as _json, os
 
         def load_json(p):
             with open(p) as f:
@@ -329,123 +329,34 @@ rule report:
         before = fp["summary"]["before_filtering"]["total_reads"]
         after = fp["summary"]["after_filtering"]["total_reads"]
 
-        # kraken: V. cholerae (taxid 666) fraction from report.
-        # Columns: pct, clade_reads, direct_reads, rank_code, taxid, name.
-        # Total reads Kraken actually processed = unclassified (taxid "0")
-        # clade count + root (taxid "1") clade count (root's clade count is
-        # every classified read). The previous max(clade_reads) over all
-        # rows picked whichever of those two happened to be larger, which
-        # is not the total and made this fraction meaningless regardless of
-        # how many species the DB could tell apart.
-        cholerae_reads, unclassified_reads, root_reads = 0, 0, 0
-        with open(input.kraken_report) as f:
-            for line in f:
-                parts = line.strip().split("\t")
-                if len(parts) >= 6:
-                    n_reads, taxid = parts[1], parts[4]
-                    try:
-                        n_reads = int(n_reads)
-                    except ValueError:
-                        continue
-                    if taxid == "666":
-                        cholerae_reads = n_reads
-                    elif taxid == "0":
-                        unclassified_reads = n_reads
-                    elif taxid == "1":
-                        root_reads = n_reads
-        total_kraken = unclassified_reads + root_reads
+        cholerae_reads, _unclass, _root, total_kraken = \
+            report_lib.parse_kraken_report(input.kraken_report)
+        v_cholerae_fraction, species_purity_pct = \
+            report_lib.species_purity(cholerae_reads, total_kraken)
 
         ex = load_json(input.extract_stats)
 
-        # genome-wide coverage: length-weighted over all contigs (chr1 + chr2)
-        # from samtools coverage rows (startpos, endpos, covbases, meandepth)
-        tot_len, tot_cov, depth_sum = 0, 0, 0.0
-        with open(input.coverage) as f:
-            for line in f:
-                if line.startswith("#rname"):
-                    continue
-                p = line.strip().split("\t")
-                if len(p) >= 7:
-                    try:
-                        length = int(p[2]) - int(p[1]) + 1
-                        tot_len += length
-                        tot_cov += int(p[4])
-                        depth_sum += float(p[6]) * length
-                    except ValueError:
-                        pass
-        mean_depth = depth_sum / tot_len if tot_len else 0.0
-        breadth = 100.0 * tot_cov / tot_len if tot_len else 0.0
+        mean_depth, breadth = report_lib.genome_wide_coverage(input.coverage)
+        with open(input.flagstat) as _f:
+            mapped = report_lib.parse_flagstat_mapped(_f.read())
 
-        mapped = 0
-        m = re.search(r"(\d+) \+ \d+ mapped", open(input.flagstat).read())
-        if m:
-            mapped = int(m.group(1))
+        bed_labels = report_lib.parse_loci_bed(input.loci_bed)
+        loci_calls = report_lib.call_loci(
+            input.loci, bed_labels, LOCUS_PRESENT_BREADTH, LOCUS_ABSENT_BREADTH)
 
-        # loci presence: match BED intervals by coordinates (samtools coverage
-        # -r prints rname/startpos/endpos, not the BED name). Called on
-        # breadth (% of locus with >= 1 read), not depth: AT-rich loci (toxT
-        # is ~28% GC vs 47.5% genome) get low Illumina depth while present.
-        # Depth is reported for information. Only meaningful if qc passes.
-        bed_labels = {}
-        with open(input.loci_bed) as f:
-            for line in f:
-                if not line.strip() or line.startswith("#"):
-                    continue
-                p = line.strip().split("\t")
-                # BED is 0-based; samtools coverage startpos is 1-based
-                bed_labels[(p[0], int(p[1]) + 1, int(p[2]))] = p[3]
-        loci_calls = {}
-        with open(input.loci) as f:
-            for line in f:
-                if line.startswith("#rname") or not line.strip() or "failed" in line:
-                    continue
-                p = line.strip().split("\t")
-                if len(p) >= 7:
-                    try:
-                        key = (p[0], int(p[1]), int(p[2]))
-                        depth, cov = float(p[6]), float(p[5])
-                    except ValueError:
-                        continue
-                    name = bed_labels.get(key, f"{p[0]}:{p[1]}-{p[2]}")
-                    if cov >= LOCUS_PRESENT_BREADTH:
-                        call = "present"
-                    elif cov < LOCUS_ABSENT_BREADTH:
-                        call = "absent"
-                    else:
-                        call = "partial"  # truncated, divergent, or low coverage
-                    loci_calls[name] = {
-                        "call": call,
-                        "present": call == "present",
-                        "mean_depth": round(depth, 2),
-                        "breadth_pct": round(cov, 2),
-                    }
-
-        try:
-            snps = int(open(input.snp_count).read().strip())
-        except ValueError:
-            snps = 0
-
-        cons_len, cons_n = 0, 0
-        with open(input.consensus) as f:
-            for line in f:
-                if not line.startswith(">"):
-                    seq = line.strip()
-                    cons_len += len(seq)
-                    cons_n += seq.upper().count("N")
-        called_pct = 100.0 * (cons_len - cons_n) / cons_len if cons_len else 0.0
+        snps = report_lib.read_snp_count(input.snp_count)
+        cons_len, cons_n, called_pct = report_lib.consensus_stats(input.consensus)
 
         # QC gate: a failing run still gets a report (for inspection), but its
         # variants/consensus/loci calls must not be treated as results.
-        v_cholerae_fraction = cholerae_reads / total_kraken if total_kraken else 0.0
-        species_purity_pct = 100.0 * v_cholerae_fraction
-
-        qc_reasons = []
-        if mean_depth < QC_MIN_MEAN_DEPTH:
-            qc_reasons.append(f"mean_depth {mean_depth:.2f} < {QC_MIN_MEAN_DEPTH}")
-        if called_pct < QC_MIN_CALLED_PCT:
-            qc_reasons.append(f"called_pct {called_pct:.2f} < {QC_MIN_CALLED_PCT}")
-        if species_purity_pct < QC_MIN_SPECIES_PURITY:
-            qc_reasons.append(f"species_purity {species_purity_pct:.2f} < {QC_MIN_SPECIES_PURITY}")
+        qc_status, qc_reasons = report_lib.evaluate_qc(
+            mean_depth, called_pct, species_purity_pct,
+            {
+                "min_mean_depth": QC_MIN_MEAN_DEPTH,
+                "min_called_pct": QC_MIN_CALLED_PCT,
+                "min_species_purity": QC_MIN_SPECIES_PURITY,
+            },
+        )
 
         report = {
             "pipeline": "vibrion-sentinel-lite",
@@ -472,7 +383,7 @@ rule report:
             "consensus_length": cons_len,
             "consensus_called_pct": round(called_pct, 2),
             "qc": {
-                "status": "fail" if qc_reasons else "pass",
+                "status": qc_status,
                 "reasons": qc_reasons,
                 "thresholds": {
                     "locus_present_breadth": LOCUS_PRESENT_BREADTH,
