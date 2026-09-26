@@ -37,7 +37,7 @@ create table if not exists sentinel_runs (
     qc_status            text,      -- 'pass' | 'fail': filter on this before using variants/loci
     qc_reasons           jsonb,
 
-    surveillance_loci    jsonb,   -- {locus_name: {mean_depth, breadth_pct, present}}
+    surveillance_loci    jsonb,   -- {locus: {call: present/partial/absent, present, mean_depth, breadth_pct}}
     report                jsonb,   -- full report.json, kept verbatim for anything not modeled above
 
     created_at           timestamptz not null default now()

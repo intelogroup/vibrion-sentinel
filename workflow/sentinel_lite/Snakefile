@@ -21,10 +21,13 @@ THREADS = config.get("threads", 2)
 MIN_SITE_DEPTH = config.get("min_site_depth", 10)        # per-position: below -> N in consensus, no variant call
 QC_MIN_MEAN_DEPTH = config.get("qc_min_mean_depth", 20)  # genome-wide mean depth
 QC_MIN_CALLED_PCT = config.get("qc_min_called_pct", 90)  # % of reference called (not masked)
+LOCUS_PRESENT_BREADTH = config.get("locus_present_breadth", 80)  # % of locus with >= 1 read
+LOCUS_ABSENT_BREADTH = config.get("locus_absent_breadth", 20)
 
 REF = f"{REFDIR}/2010EL-1786.fasta"
 KRAKEN_DB = f"{REFDIR}/kraken2_haiti_custom"
-LOCI_BED = f"{REFDIR}/loci.bed"
+# curated, versioned with the code (not the reference bundle); see file header
+LOCI_BED = config.get("loci_bed", f"{workflow.basedir}/loci_2010EL-1786.bed")
 
 
 rule all:
@@ -354,8 +357,10 @@ rule report:
             mapped = int(m.group(1))
 
         # loci presence: match BED intervals by coordinates (samtools coverage
-        # -r prints rname/startpos/endpos, not the BED name). Depth >= 5x
-        # over >= 80% of locus = present.
+        # -r prints rname/startpos/endpos, not the BED name). Called on
+        # breadth (% of locus with >= 1 read), not depth: AT-rich loci (toxT
+        # is ~28% GC vs 47.5% genome) get low Illumina depth while present.
+        # Depth is reported for information. Only meaningful if qc passes.
         bed_labels = {}
         with open(input.loci_bed) as f:
             for line in f:
@@ -377,10 +382,17 @@ rule report:
                     except ValueError:
                         continue
                     name = bed_labels.get(key, f"{p[0]}:{p[1]}-{p[2]}")
+                    if cov >= LOCUS_PRESENT_BREADTH:
+                        call = "present"
+                    elif cov < LOCUS_ABSENT_BREADTH:
+                        call = "absent"
+                    else:
+                        call = "partial"  # truncated, divergent, or low coverage
                     loci_calls[name] = {
+                        "call": call,
+                        "present": call == "present",
                         "mean_depth": round(depth, 2),
                         "breadth_pct": round(cov, 2),
-                        "present": bool(depth >= 5 and cov >= 80),
                     }
 
         try:
@@ -433,6 +445,8 @@ rule report:
                 "status": "fail" if qc_reasons else "pass",
                 "reasons": qc_reasons,
                 "thresholds": {
+                    "locus_present_breadth": LOCUS_PRESENT_BREADTH,
+                    "locus_absent_breadth": LOCUS_ABSENT_BREADTH,
                     "min_site_depth": MIN_SITE_DEPTH,
                     "min_mean_depth": QC_MIN_MEAN_DEPTH,
                     "min_called_pct": QC_MIN_CALLED_PCT,

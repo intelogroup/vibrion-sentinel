@@ -1,7 +1,8 @@
 name: Build sentinel reference bundle
 
 # One-time (re-run when references change): builds the Haiti kraken2 DB,
-# serogroup DB, 7PET reference + BWA index, and surveillance-loci BED,
+# serogroup DB and 7PET reference + BWA index (surveillance loci BED is
+# curated in workflow/sentinel_lite/, not built here),
 # then publishes them as a GitHub Release asset consumed by sentinel-watch.
 
 on:
@@ -30,11 +31,10 @@ jobs:
           set -euo pipefail
           mkdir -p refs_build && cd refs_build
 
-          echo "▶ Fetching 2010EL-1786 (fasta + genbank)..."
+          echo "▶ Fetching 2010EL-1786 (fasta)..."
           curl -sL "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id=CP003069.1&rettype=fasta&retmode=text" -o chr1.fa
           curl -sL "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id=CP003070.1&rettype=fasta&retmode=text" -o chr2.fa
           cat chr1.fa chr2.fa > 2010EL-1786.fasta
-          curl -sL "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id=CP003069.1&rettype=gb&retmode=text" -o 2010EL-1786.gb
           head -c 1 2010EL-1786.fasta | grep -q ">" || { echo "fasta fetch failed"; exit 1; }
 
           echo "▶ Fetching Haiti 2022 resurgence reference..."
@@ -59,16 +59,12 @@ jobs:
           kraken2-build --add-to-library serogroup_src.fasta --db kraken2_serogroup
           kraken2-build --build --db kraken2_serogroup --threads 2
 
-          echo "▶ Surveillance loci BED from GenBank annotations..."
-          python3 ../scripts/extract_loci_bed.py --genbank 2010EL-1786.gb --out loci.bed
-          wc -l loci.bed
-
           echo "▶ Packaging..."
           tar -czf ../sentinel-refs-v1.tar.gz \
             2010EL-1786.fasta 2010EL-1786.fasta.bwt 2010EL-1786.fasta.pac \
             2010EL-1786.fasta.ann 2010EL-1786.fasta.amb 2010EL-1786.fasta.sa \
             Haiti_2022_Resurgence.fasta \
-            kraken2_haiti_custom kraken2_serogroup loci.bed
+            kraken2_haiti_custom kraken2_serogroup
           du -sh ../sentinel-refs-v1.tar.gz
 
       - name: Publish release asset
@@ -76,6 +72,6 @@ jobs:
           gh release delete sentinel-refs-v1 --yes 2>/dev/null || true
           gh release create sentinel-refs-v1 sentinel-refs-v1.tar.gz \
             --title "Sentinel reference bundle v1" \
-            --notes "Haiti kraken2 DB, serogroup DB, 2010EL-1786 + BWA index, surveillance loci BED. Built by build-references.yml."
+            --notes "Haiti kraken2 DB, serogroup DB, 2010EL-1786 + BWA index. Built by build-references.yml."
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
