@@ -1,0 +1,46 @@
+# Expectations for the PRJNA900623 (Haiti 2022) back-test.
+#
+# Each entry is something our pipeline actually measures, chosen to
+# correspond to a published finding. Sources:
+#   JCM 2023  https://journals.asm.org/doi/full/10.1128/jcm.00142-23
+#   EID 2023  https://wwwnc.cdc.gov/eid/article/29/10/23-0554_article
+# Reported: 2022 Haiti isolates were toxigenic O1, homogeneous, and closely
+# related to strains circulating in Haiti during 2012-2019.
+#
+# NOT claimed here: reproducing their Bayesian ancestral-origin analysis.
+# A mapping-based pipeline with no assembly cannot do that; agreement on
+# gene content and SNP spread is supporting evidence, not reproduction.
+#
+# Thresholds are deliberately loose -- they encode "the published
+# description holds", not exact numeric equality with a different method.
+
+cohort: backtest-2022
+manifest: cohorts/backtest-2022.tsv
+
+qc:
+  # These are published, deliberately-sequenced clinical isolates, so most
+  # should clear our QC. A low pass rate indicts our pipeline, not the data.
+  min_pass_rate: 0.80
+
+loci_present:
+  # Fraction of QC-pass samples in which each locus must be called present.
+  # Toxigenic O1: cholera toxin cluster + O1 antigen genes.
+  ctxA: 0.90
+  ctxB: 0.90
+  zot: 0.90
+  ace: 0.90
+  tcpA: 0.90
+  toxR: 0.90
+  wbeT: 0.90
+  rfbV: 0.90
+
+snps_vs_7pet:
+  # "Homogeneous" is testable as a tight spread, not an exact value: these
+  # are all one lineage, so SNP distance to the 2010 Haiti reference should
+  # cluster narrowly rather than scatter.
+  max_median: 400
+  max_iqr: 150
+
+notes: >
+  A failure here is a finding about the pipeline and must be reported as
+  such, not silently retuned until it passes.

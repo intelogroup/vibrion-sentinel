@@ -279,17 +279,29 @@ rule depth_mask:
 
 
 rule consensus:
+    """SNV-only consensus, so every sample stays on reference coordinates.
+
+    Applying indels would shift sequence length per sample (observed:
+    ~30 indels each, giving chr1 lengths of 3031383/3031386/3031387 across
+    three samples). Cohort analyses stack these sequences positionally and
+    treat column i as the same locus in every sample, which silently breaks
+    the moment lengths diverge. Indels are still called and kept in
+    variants.vcf.gz; they are just not applied here.
+    """
     input:
         vcf=rules.call_variants.output.vcf,
         mask=rules.depth_mask.output.bed,
     output:
         fa=f"{OUTDIR}/06_variants/consensus.fasta",
+        snv=f"{OUTDIR}/06_variants/variants.snv.vcf.gz",
     log:
         f"{OUTDIR}/06_variants/consensus.log",
     shell:
         """
-        bcftools consensus -f {REF} -m {input.mask} {input.vcf} \
-            > {output.fa} 2> {log}
+        bcftools view -v snps -Oz -o {output.snv} {input.vcf} 2> {log}
+        bcftools index -f {output.snv} 2>> {log}
+        bcftools consensus -f {REF} -m {input.mask} {output.snv} \
+            > {output.fa} 2>> {log}
         """
 
 
