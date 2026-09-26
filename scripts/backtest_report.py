@@ -30,7 +30,9 @@ def load_expect(path):
     data = {}
     stack = [(0, data)]
     pending_block = None
-    for raw in open(path):
+    with open(path) as f_in:
+        raw_lines = f_in.readlines()
+    for raw in raw_lines:
         line = raw.rstrip("\n")
         if pending_block is not None:
             if line.startswith("  ") or not line.strip():
@@ -63,7 +65,9 @@ def load_expect(path):
 
 def cohort_accessions(manifest):
     accs = []
-    for line in open(manifest):
+    with open(manifest) as f:
+        lines = f.readlines()
+    for line in lines:
         if line.startswith("#") or not line.strip():
             continue
         parts = line.rstrip("\n").split("\t")
@@ -78,7 +82,8 @@ def from_results_dir(accs, results_dir):
     for a in accs:
         p = os.path.join(results_dir, a, "report.json")
         if os.path.exists(p):
-            rows.append(json.load(open(p)))
+            with open(p) as f:
+                rows.append(json.load(f))
     return rows
 
 
@@ -95,6 +100,57 @@ def from_supabase(accs):
     with urllib.request.urlopen(req, timeout=60) as r:
         return [row["report"] for row in json.loads(r.read().decode())
                 if row.get("report")]
+
+
+def evaluate_checks(reports, exp):
+    """[(name, observed_str, expected_str, passed_bool), ...] for one
+    cohort's reports against its expectations dict. Pulled out of main()
+    so the check math (QC pass rate, locus-presence fraction, SNP
+    median/IQR) can be tested without report.json fixtures on disk and
+    without argparse/sys.exit in the way.
+
+    reports: list of report.json dicts (already loaded).
+    exp: the dict load_expect() returns.
+    """
+    checks = []
+
+    passed = [r for r in reports if r.get("qc", {}).get("status") == "pass"]
+    rate = len(passed) / len(reports) if reports else 0.0
+    floor = exp.get("qc", {}).get("min_pass_rate", 0)
+    checks.append((
+        "qc pass rate", f"{rate:.2f} ({len(passed)}/{len(reports)})",
+        f">= {floor}", rate >= floor))
+
+    if not passed:
+        return checks
+
+    for locus, min_frac in (exp.get("loci_present") or {}).items():
+        present = sum(
+            1 for r in passed
+            if (r.get("surveillance_loci", {}).get(locus, {}) or {}).get("call")
+            == "present")
+        frac = present / len(passed)
+        checks.append((
+            f"locus {locus} present", f"{frac:.2f} ({present}/{len(passed)})",
+            f">= {min_frac}", frac >= min_frac))
+
+    snps = sorted(r.get("variants", {}).get("snps_vs_7pet", 0) for r in passed)
+    se = exp.get("snps_vs_7pet") or {}
+    if snps:
+        med = statistics.median(snps)
+        if len(snps) >= 4:
+            q = statistics.quantiles(snps, n=4)
+            iqr = q[2] - q[0]
+        else:
+            iqr = max(snps) - min(snps)
+        if "max_median" in se:
+            checks.append(("snps median", f"{med:g}",
+                           f"<= {se['max_median']}", med <= se["max_median"]))
+        if "max_iqr" in se:
+            checks.append((f"snps spread (IQR, n={len(snps)})", f"{iqr:g}",
+                           f"<= {se['max_iqr']}", iqr <= se["max_iqr"]))
+
+    return checks
 
 
 def main():
@@ -122,46 +178,13 @@ def main():
     if not reports:
         sys.exit("no reports found -- has the cohort been processed?")
 
-    checks = []
-
-    # --- QC pass rate ---
+    checks = evaluate_checks(reports, exp)
     passed = [r for r in reports if r.get("qc", {}).get("status") == "pass"]
-    rate = len(passed) / len(reports)
-    floor = exp.get("qc", {}).get("min_pass_rate", 0)
-    checks.append((
-        "qc pass rate", f"{rate:.2f} ({len(passed)}/{len(reports)})",
-        f">= {floor}", rate >= floor))
-
     if not passed:
         print("no QC-pass samples; cannot evaluate biological expectations")
     else:
-        # --- locus presence across QC-pass samples ---
-        for locus, min_frac in (exp.get("loci_present") or {}).items():
-            present = sum(
-                1 for r in passed
-                if (r.get("surveillance_loci", {}).get(locus, {}) or {}).get("call")
-                == "present")
-            frac = present / len(passed)
-            checks.append((
-                f"locus {locus} present", f"{frac:.2f} ({present}/{len(passed)})",
-                f">= {min_frac}", frac >= min_frac))
-
-        # --- SNP spread (the testable form of "homogeneous") ---
         snps = sorted(r.get("variants", {}).get("snps_vs_7pet", 0) for r in passed)
-        se = exp.get("snps_vs_7pet") or {}
         if snps:
-            med = statistics.median(snps)
-            if len(snps) >= 4:
-                q = statistics.quantiles(snps, n=4)
-                iqr = q[2] - q[0]
-            else:
-                iqr = max(snps) - min(snps)
-            if "max_median" in se:
-                checks.append(("snps median", f"{med:g}",
-                               f"<= {se['max_median']}", med <= se["max_median"]))
-            if "max_iqr" in se:
-                checks.append((f"snps spread (IQR, n={len(snps)})", f"{iqr:g}",
-                               f"<= {se['max_iqr']}", iqr <= se["max_iqr"]))
             print(f"snps_vs_7pet across QC-pass samples: {snps}")
 
     width = max(len(c[0]) for c in checks)
