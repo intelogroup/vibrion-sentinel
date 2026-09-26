@@ -18,6 +18,8 @@ import sys
 import urllib.parse
 import urllib.request
 
+import build_cohort_lib
+
 ENA_SEARCH = "https://www.ebi.ac.uk/ena/portal/api/search"
 
 FIELDS = [
@@ -85,30 +87,17 @@ def main():
     if not rows:
         sys.exit("no runs returned -- refusing to write an empty manifest")
 
-    idx = {h: i for i, h in enumerate(header)}
-
-    def get(row, name):
-        i = idx.get(name, -1)
-        return row[i] if 0 <= i < len(row) else ""
-
-    # deterministic order: collection_date, then accession
-    rows.sort(key=lambda r: (get(r, "collection_date"), get(r, "run_accession")))
+    rows = build_cohort_lib.sort_and_limit(header, rows, args.limit)
     if args.limit:
-        rows = rows[: args.limit]
         print(f"limited to {len(rows)} runs", file=sys.stderr)
 
     with open(args.out, "w") as f:
-        f.write(f"# cohort: {args.cohort}\n")
-        f.write(f"# ena_query: {query}\n")
-        f.write(f"# runs: {len(rows)}\n")
-        f.write("\t".join(header) + "\n")
-        for r in rows:
-            f.write("\t".join(r) + "\n")
+        f.write(build_cohort_lib.format_manifest(args.cohort, query, header, rows))
     print(f"wrote {args.out} ({len(rows)} runs)", file=sys.stderr)
 
-    dates = [get(r, "collection_date") for r in rows if get(r, "collection_date")]
-    if dates:
-        print(f"collection dates: {min(dates)} .. {max(dates)}", file=sys.stderr)
+    dr = build_cohort_lib.date_range(header, rows)
+    if dr:
+        print(f"collection dates: {dr[0]} .. {dr[1]}", file=sys.stderr)
 
 
 if __name__ == "__main__":
