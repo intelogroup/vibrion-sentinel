@@ -240,6 +240,31 @@ jobs:
             -H "Prefer: resolution=merge-duplicates" \
             --data @/tmp/sentinel_row.json
 
+      - name: Archive consensus to R2 (QC-pass only)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${R2_BUCKET:-}" ]; then
+            echo "R2_BUCKET secret not set -- skipping consensus archive"
+            exit 0
+          fi
+          ACC="${{ matrix.accession }}"
+          # QC-fail consensus is mostly N (low-depth positions are masked) and
+          # must never reach a cohort alignment -- gate on the report's verdict.
+          QC=$(python3 -c "import json;print(json.load(open('results/${ACC}/report.json'))['qc']['status'])")
+          if [ "$QC" != "pass" ]; then
+            echo "qc status '$QC' -- not archiving consensus for $ACC"
+            exit 0
+          fi
+          gzip -c "results/${ACC}/06_variants/consensus.fasta" > "/tmp/${ACC}.fasta.gz"
+          aws s3 cp "/tmp/${ACC}.fasta.gz" \
+            "s3://${R2_BUCKET}/consensus/${ACC}.fasta.gz" \
+            --endpoint-url "$AWS_ENDPOINT_URL"
+
       - name: Upload results
         uses: actions/upload-artifact@v4
         with:
