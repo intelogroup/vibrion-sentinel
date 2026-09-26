@@ -13,6 +13,8 @@ configfile: "work/config.yaml"  # overridden by --configfile
 import sys as _sys
 _sys.path.insert(0, workflow.basedir)
 import report_lib
+import vibrio_extract_lib
+import loci_coverage_lib
 
 ACC = config["accession"]
 REFDIR = config["refdir"]
@@ -111,46 +113,14 @@ rule extract_vibrio:
         r2=f"{OUTDIR}/03_vibrio/vibrio_2.fastq.gz",
         stats=f"{OUTDIR}/03_vibrio/extraction_stats.json",
     run:
-        import gzip, json
+        import json, os
 
-        CHOLERAE_TAXID = "666"
-        keep = set()  # read ids (without /1 /2 suffix)
-        n_class, n_keep = 0, 0
-        with open(input.kraken) as fh:
-            for line in fh:
-                parts = line.split("\t")
-                if len(parts) < 3:
-                    continue
-                status, rid, taxid = parts[0], parts[1], parts[2]
-                n_class += 1
-                base = rid.rsplit("/", 1)[0] if "/" in rid else rid
-                if status == "C" and taxid == CHOLERAE_TAXID:
-                    keep.add(base)
-                    n_keep += 1
-                elif status == "U":
-                    keep.add(base)
-                    n_keep += 1
+        keep, n_class, n_keep = vibrio_extract_lib.build_keep_set(input.kraken)
 
-        def filtered(in_path, out_path, suffix):
-            n_in, n_out = 0, 0
-            with gzip.open(in_path, "rt") as fin, gzip.open(out_path, "wt") as fout:
-                while True:
-                    h = fin.readline()
-                    if not h:
-                        break
-                    seq, plus, qual = fin.readline(), fin.readline(), fin.readline()
-                    n_in += 1
-                    base = h[1:].split()[0].rsplit("/", 1)[0]
-                    if base in keep:
-                        fout.write(h + seq + plus + qual)
-                        n_out += 1
-            return n_in, n_out
-
-        import os
         os.makedirs(f"{OUTDIR}/03_vibrio", exist_ok=True)
-        i1, o1 = filtered(input.r1, output.r1, "1")
+        i1, o1 = vibrio_extract_lib.filter_fastq(input.r1, output.r1, keep)
         if PAIRED:
-            i2, o2 = filtered(input.r2, output.r2, "2")
+            i2, o2 = vibrio_extract_lib.filter_fastq(input.r2, output.r2, keep)
         else:
             open(output.r2, "wb").close()  # placeholder; downstream skips R2
             i2, o2 = 0, 0
@@ -215,19 +185,14 @@ rule loci_coverage:
         header = ("#rname\tstartpos\tendpos\tnumreads\tcovbases\t"
                   "coverage\tmeandepth\tmeanbaseq\tmeanmapq\n")
         rows = []
-        with open(LOCI_BED) as fh:
-            for line in fh:
-                if not line.strip() or line.startswith("#"):
+        for _bed_fields, region in loci_coverage_lib.iter_bed_regions(LOCI_BED):
+            r = subprocess.run(
+                ["samtools", "coverage", "-r", region, input.bam],
+                capture_output=True, text=True)
+            for ln in r.stdout.splitlines():
+                if ln.startswith("#rname") or not ln.strip():
                     continue
-                p = line.rstrip("\n").split("\t")
-                region = f"{p[0]}:{int(p[1]) + 1}-{p[2]}"
-                r = subprocess.run(
-                    ["samtools", "coverage", "-r", region, input.bam],
-                    capture_output=True, text=True)
-                for ln in r.stdout.splitlines():
-                    if ln.startswith("#rname") or not ln.strip():
-                        continue
-                    rows.append(ln)
+                rows.append(ln)
         with open(output.txt, "w") as out:
             out.write(header)
             for ln in rows:
