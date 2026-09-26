@@ -16,6 +16,10 @@
 #                outdir=results/cohort/backtest-2022 --cores 4
 
 import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(workflow.snakefile)))
+import stack_lib
 
 MANIFEST = config["manifest"]
 CONSENSUS_DIR = config["consensus_dir"]      # local dir of <ACC>.fasta[.gz]
@@ -62,108 +66,29 @@ rule stack_alignment:
         stats=f"{OUTDIR}/alignment_stats.json",
         dropped=f"{OUTDIR}/excluded_samples.tsv",
     run:
-        import glob
-        import gzip
         import json
-        import os
 
         os.makedirs(OUTDIR, exist_ok=True)
 
-        def read_consensus(acc):
-            for pat in (f"{CONSENSUS_DIR}/{acc}.fasta.gz", f"{CONSENSUS_DIR}/{acc}.fasta"):
-                if os.path.exists(pat):
-                    op = gzip.open if pat.endswith(".gz") else open
-                    seqs, name = {}, None
-                    with op(pat, "rt") as fh:
-                        for line in fh:
-                            if line.startswith(">"):
-                                name = line[1:].split()[0]
-                                seqs[name] = []
-                            elif name:
-                                seqs[name].append(line.strip())
-                    return {k: "".join(v) for k, v in seqs.items()}
-            return None
-
-        # exclusion mask -> set of 0-based positions per contig
-        masked = {}
-        if os.path.exists(MASK_BED):
-            with open(MASK_BED) as fh:
-                for line in fh:
-                    if line.startswith("#") or not line.strip():
-                        continue
-                    p = line.split("\t")
-                    masked.setdefault(p[0], []).append((int(p[1]), int(p[2])))
-
-        loaded, excluded = {}, []
-        for acc in ACCESSIONS:
-            c = read_consensus(acc)
-            if not c:
-                excluded.append((acc, "no consensus available"))
-                continue
-            seq = "".join(c[k] for k in sorted(c))
-            called = 1.0 - (seq.upper().count("N") / len(seq)) if seq else 0.0
-            if called < MIN_SAMPLE_CALLED:
-                excluded.append((acc, f"called {called:.3f} < {MIN_SAMPLE_CALLED}"))
-                continue
-            loaded[acc] = (c, called)
+        masked = stack_lib.load_mask(MASK_BED)
+        loaded, excluded = stack_lib.load_and_filter_samples(
+            ACCESSIONS, CONSENSUS_DIR, MIN_SAMPLE_CALLED)
 
         if len(loaded) < 3:
             raise RuntimeError(
                 f"only {len(loaded)} usable consensus sequences "
                 f"({len(excluded)} excluded) -- need >=3 for a tree")
 
-        contigs = sorted(next(iter(loaded.values()))[0])
-        lengths = {ct: len(next(iter(loaded.values()))[0][ct]) for ct in contigs}
-        for acc, (c, _) in loaded.items():
-            for ct in contigs:
-                if len(c.get(ct, "")) != lengths[ct]:
-                    raise RuntimeError(
-                        f"{acc} contig {ct} length {len(c.get(ct,''))} != "
-                        f"{lengths[ct]}: consensus sequences are not on identical "
-                        "reference coordinates, so stacking them is invalid")
-
-        # mark masked positions per contig
-        skip = {ct: bytearray(lengths[ct]) for ct in contigs}
-        n_masked = 0
-        for ct, ivs in masked.items():
-            if ct not in skip:
-                continue
-            for s, e in ivs:
-                for i in range(max(0, s), min(e, lengths[ct])):
-                    if not skip[ct][i]:
-                        skip[ct][i] = 1
-                        n_masked += 1
-
-        accs = sorted(loaded)
-        cols = []           # variable, sufficiently-covered sites
-        total_sites = 0
-        n_missing_dropped = 0
-        n_invariant = 0
-        for ct in contigs:
-            seqs = [loaded[a][0][ct].upper() for a in accs]
-            for i in range(lengths[ct]):
-                if skip[ct][i]:
-                    continue
-                total_sites += 1
-                col = [s[i] for s in seqs]
-                miss = sum(1 for b in col if b not in "ACGT")
-                if miss / len(col) > MAX_SITE_MISSING:
-                    n_missing_dropped += 1
-                    continue
-                if len({b for b in col if b in "ACGT"}) < 2:
-                    n_invariant += 1
-                    continue
-                cols.append(col)
+        contigs, lengths = stack_lib.validate_coordinates(loaded)
+        skip, n_masked = stack_lib.build_skip_mask(masked, contigs, lengths)
+        accs, cols, total_sites, n_missing_dropped, n_invariant = \
+            stack_lib.build_alignment_columns(
+                loaded, contigs, lengths, skip, MAX_SITE_MISSING)
 
         with open(output.aln, "w") as out:
-            for j, a in enumerate(accs):
-                out.write(f">{a}\n")
-                out.write("".join(c[j] for c in cols) + "\n")
-
+            out.write(stack_lib.format_alignment_fasta(accs, cols))
         with open(output.dropped, "w") as out:
-            out.write("accession\treason\n")
-            for acc, why in excluded:
-                out.write(f"{acc}\t{why}\n")
+            out.write(stack_lib.format_excluded_tsv(excluded))
 
         stats = {
             "cohort_manifest": MANIFEST,
@@ -200,27 +125,10 @@ rule snp_distances:
     output:
         tsv=f"{OUTDIR}/snp_distances.tsv",
     run:
-        seqs, name = {}, None
-        with open(input.aln) as fh:
-            for line in fh:
-                if line.startswith(">"):
-                    name = line[1:].strip()
-                    seqs[name] = ""
-                else:
-                    seqs[name] += line.strip()
-        accs = sorted(seqs)
+        seqs = stack_lib.parse_fasta(input.aln)
+        accs, dist = stack_lib.pairwise_snp_distances(seqs)
         with open(output.tsv, "w") as out:
-            out.write("\t" + "\t".join(accs) + "\n")
-            for a in accs:
-                row = [a]
-                for b in accs:
-                    d = sum(
-                        1
-                        for x, y in zip(seqs[a], seqs[b])
-                        if x in "ACGT" and y in "ACGT" and x != y
-                    )
-                    row.append(str(d))
-                out.write("\t".join(row) + "\n")
+            out.write(stack_lib.format_distance_matrix(accs, dist))
 
 
 rule tree:
