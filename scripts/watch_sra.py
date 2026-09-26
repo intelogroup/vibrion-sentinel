@@ -16,6 +16,7 @@ Usage:
 
 import argparse
 import json
+import re
 import sys
 import time
 import urllib.parse
@@ -62,21 +63,64 @@ def esearch_ids(term, reldate=None):
     return ids
 
 
+def extract_run_accessions(esummary_root):
+    """Run accessions (SRR/ERR/DRR...) from a parsed esummary XML root
+    (containing one or more DocSum elements). Pulled out of
+    summarize_run_ids so the escaped-XML parsing can be tested with a
+    synthetic tree, no network call needed.
+
+    NCBI nests the actual run accessions inside a "Runs" Item as escaped
+    XML text: <Run acc="SRR..." .../> (one experiment may carry several
+    runs). An earlier version of this function looked for an Item named
+    "Run" (singular) instead, which never matches -- esummary_root.iter()
+    is find-based, so a wrong name fails silently rather than raising,
+    and the watcher returned zero new accessions on every scheduled run."""
+    accs = []
+    for doc in esummary_root.iter("DocSum"):
+        for item in doc.iter("Item"):
+            if item.get("Name") == "Runs":
+                accs.extend(re.findall(r'<Run acc="([^"]+)"', item.text or ""))
+    return accs
+
+
 def summarize_run_ids(ids):
     """Map SRA internal ids -> run accessions (SRR...)."""
     accs = []
     for i in range(0, len(ids), 200):
         chunk = ids[i:i + 200]
         root = eu_xml("esummary.fcgi", {"db": "sra", "id": ",".join(chunk)})
-        for doc in root.iter("DocSum"):
-            acc = None
-            for item in doc.iter("Item"):
-                if item.get("Name") == "Run":
-                    acc = (item.text or "").strip()
-            if acc:
-                accs.append(acc)
+        accs.extend(extract_run_accessions(root))
         time.sleep(0.4)
     return accs
+
+
+def load_seen(path):
+    """Set of already-processed accessions from state/seen_accessions.txt.
+    A missing file means nothing has been seen yet, not an error."""
+    try:
+        with open(path) as f:
+            return {l.strip() for l in f if l.strip() and not l.startswith("#")}
+    except FileNotFoundError:
+        return set()
+
+
+def build_new_items(geo_accs, recent_accs, seen, max_new):
+    """Haiti-tier accessions first, then global-tier, each deduplicated
+    against `seen`, against each other (an accession already added as
+    "haiti" is not re-added as "global"), and against repeats within the
+    same tier (esummary chunking could plausibly return one accession
+    twice) -- capped at max_new total."""
+    new_items = []
+    already = set()
+    for acc in geo_accs:
+        if acc not in seen and acc not in already:
+            new_items.append({"accession": acc, "priority": "haiti"})
+            already.add(acc)
+    for acc in recent_accs:
+        if acc not in seen and acc not in already:
+            new_items.append({"accession": acc, "priority": "global"})
+            already.add(acc)
+    return new_items[:max_new]
 
 
 def main():
@@ -104,15 +148,8 @@ def main():
     recent_ids = esearch_ids('"Vibrio cholerae"[Organism]', reldate=args.days)
     print(f"global SRA records (last {args.days}d): {len(recent_ids)}", file=sys.stderr)
 
-    new_items = []
-    for acc in summarize_run_ids(geo_ids):
-        if acc not in seen:
-            new_items.append({"accession": acc, "priority": "haiti"})
-    for acc in summarize_run_ids(recent_ids):
-        if acc not in seen and all(i["accession"] != acc for i in new_items):
-            new_items.append({"accession": acc, "priority": "global"})
-
-    new_items = new_items[:args.max_new]
+    new_items = build_new_items(
+        summarize_run_ids(geo_ids), summarize_run_ids(recent_ids), seen, args.max_new)
     print(f"new accessions to process: {len(new_items)}", file=sys.stderr)
 
     matrix = {"include": new_items}

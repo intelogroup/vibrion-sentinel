@@ -1,0 +1,13 @@
+name: cohort-phylo
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - snakemake>=8.0
+  # bioconda currently ships iqtree v3 under both `iqtree` and `iqtree3`;
+  # the Snakefile resolves whichever binary exists.
+  - iqtree>=2.2
+# Deliberately leaner than workflow/envs/phylogeny.yaml, which pulls R,
+# bioconductor-ggtree and augur -- none of which this cohort workflow uses,
+# and which make the CI env solve substantially slower.

@@ -16,6 +16,12 @@ on:
         description: "Comma-separated run accessions to process directly (skips SRA search; for testing/manual runs)"
         required: false
         default: ""
+      force_priority:
+        description: "Priority tag applied to force_accessions (set 'haiti' to also archive raw reads to R2)"
+        required: false
+        default: "global"
+        type: choice
+        options: ["global", "haiti"]
 
 permissions:
   contents: write
@@ -38,10 +44,11 @@ jobs:
         run: |
           if [ -n "${{ inputs.force_accessions }}" ]; then
             echo "Forced accessions: ${{ inputs.force_accessions }}"
-            python3 - "${{ inputs.force_accessions }}" <<'EOF'
+            python3 - "${{ inputs.force_accessions }}" "${{ inputs.force_priority }}" <<'EOF'
           import json, sys
           accs = [a.strip() for a in sys.argv[1].split(",") if a.strip()]
-          json.dump({"include": [{"accession": a} for a in accs]}, open("/tmp/matrix.json", "w"))
+          priority = sys.argv[2] or "global"
+          json.dump({"include": [{"accession": a, "priority": priority} for a in accs]}, open("/tmp/matrix.json", "w"))
           EOF
           else
             python3 scripts/watch_sra.py \
@@ -145,6 +152,26 @@ jobs:
           print(open(f"work/{acc}/config.yaml").read())
           EOF
 
+      - name: Archive raw reads to R2 (Haiti-tier only)
+        if: matrix.priority == 'haiti'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${R2_BUCKET:-}" ]; then
+            echo "R2_BUCKET secret not set — skipping raw-read archive"
+            exit 0
+          fi
+          ACC="${{ matrix.accession }}"
+          for f in "work/${ACC}"/*.fastq.gz; do
+            [ -e "$f" ] || continue
+            aws s3 cp "$f" "s3://${R2_BUCKET}/raw/haiti/${ACC}/$(basename "$f")" \
+              --endpoint-url "$AWS_ENDPOINT_URL"
+          done
+
       - name: Run lite pipeline
         shell: micromamba-shell {0}
         run: |
@@ -156,6 +183,87 @@ jobs:
             --cores 2 --printshellcmds
           echo "=== report ==="
           cat "results/${ACC}/report.json"
+          # QC fail is a data verdict, not a pipeline error: keep the job green
+          # (artifacts stay inspectable) but surface it in the run summary.
+          python3 - "$ACC" <<'EOF'
+          import json, sys
+          acc = sys.argv[1]
+          qc = json.load(open(f"results/{acc}/report.json"))["qc"]
+          if qc["status"] != "pass":
+              print(f"::warning title=QC fail {acc}::" + "; ".join(qc["reasons"]))
+          EOF
+
+      - name: Push report to Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY not set -- skipping metrics push"
+            exit 0
+          fi
+          python3 - "${{ matrix.accession }}" "${{ matrix.priority }}" <<'EOF' > /tmp/sentinel_row.json
+          import json, sys
+          acc, priority = sys.argv[1], sys.argv[2] or None
+          with open(f"results/{acc}/report.json") as f:
+              r = json.load(f)
+          row = {
+              "accession": r["accession"],
+              "priority": priority,
+              "pipeline_version": r.get("version"),
+              "reference": r.get("reference"),
+              "reads_raw": r.get("reads", {}).get("raw"),
+              "reads_qc_passed": r.get("reads", {}).get("qc_passed"),
+              "reads_vibrio_kept": r.get("reads", {}).get("vibrio_kept"),
+              "kraken_db": r.get("classification", {}).get("kraken_db"),
+              "v_cholerae_reads": r.get("classification", {}).get("v_cholerae_reads"),
+              "v_cholerae_fraction": r.get("classification", {}).get("v_cholerae_fraction"),
+              "mapped_reads": r.get("mapping", {}).get("mapped_reads"),
+              "mean_depth": r.get("mapping", {}).get("mean_depth"),
+              "breadth_pct": r.get("mapping", {}).get("breadth_pct"),
+              "snps_vs_7pet": r.get("variants", {}).get("snps_vs_7pet"),
+              "consensus_length": r.get("consensus_length"),
+              "consensus_called_pct": r.get("consensus_called_pct"),
+              "qc_status": r.get("qc", {}).get("status"),
+              "qc_reasons": r.get("qc", {}).get("reasons"),
+              "surveillance_loci": r.get("surveillance_loci"),
+              "report": r,
+          }
+          json.dump(row, sys.stdout)
+          EOF
+          curl -sS --fail-with-body -X POST \
+            "${SUPABASE_URL}/rest/v1/sentinel_runs" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: resolution=merge-duplicates" \
+            --data @/tmp/sentinel_row.json
+
+      - name: Archive consensus to R2 (QC-pass only)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${R2_BUCKET:-}" ]; then
+            echo "R2_BUCKET secret not set -- skipping consensus archive"
+            exit 0
+          fi
+          ACC="${{ matrix.accession }}"
+          # QC-fail consensus is mostly N (low-depth positions are masked) and
+          # must never reach a cohort alignment -- gate on the report's verdict.
+          QC=$(python3 -c "import json;print(json.load(open('results/${ACC}/report.json'))['qc']['status'])")
+          if [ "$QC" != "pass" ]; then
+            echo "qc status '$QC' -- not archiving consensus for $ACC"
+            exit 0
+          fi
+          gzip -c "results/${ACC}/06_variants/consensus.fasta" > "/tmp/${ACC}.fasta.gz"
+          aws s3 cp "/tmp/${ACC}.fasta.gz" \
+            "s3://${R2_BUCKET}/consensus/${ACC}.fasta.gz" \
+            --endpoint-url "$AWS_ENDPOINT_URL"
 
       - name: Upload results
         uses: actions/upload-artifact@v4

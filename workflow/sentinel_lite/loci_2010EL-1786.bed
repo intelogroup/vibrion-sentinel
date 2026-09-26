@@ -1,0 +1,45 @@
+# Surveillance loci on V. cholerae O1 2010EL-1786 (CP003069.1 chr1, CP003070.1 chr2).
+# BED: 0-based start, end-exclusive. Curated by hand; do not regenerate by keyword.
+#
+# Provenance of each interval (checked 2026-09-26):
+#   ann = /gene annotation in the 2010EL-1786 GenBank record
+#   aln = N16961 CDS (AE003852.1/AE003853.1, locus tag given) aligned with bwa mem,
+#         MAPQ 60; used where 2010EL-1786 has no /gene name
+# All intervals except wbeT verified: start codon, stop codon, length % 3 == 0.
+#
+# Interpretation limits (mapping to an O1 reference):
+#   - Calls are presence/absence of reference-like sequence only. Genes absent
+#     from this reference (e.g. O139 wbf cluster) cannot be detected here.
+#   - wbeT present does not give Ogawa vs Inaba (point mutations); gyrA/parC/parE
+#     present does not give QRDR resistance mutations. Allele calls are future work.
+#   - hapR omitted: not annotated as a CDS in N16961 or 2010EL-1786, and
+#     presence/absence cannot detect its known loss-of-function alleles.
+#
+#chrom	start	end	name	score	strand	source
+# SXT/R391 ICE resistance cargo
+CP003069.1	98146	99361	floR	.	+	ann
+CP003069.1	100316	101147	strB	.	-	ann
+CP003069.1	101152	101956	strA	.	-	ann
+CP003069.1	102016	102832	sul2	.	-	ann
+CP003069.1	168756	169230	dfrA1	.	-	ann
+# VPI-1 (toxin co-regulated pilus island)
+CP003069.1	367949	368624	tcpA	.	+	ann
+CP003069.1	368703	369996	tcpB	.	+	aln:VC_0829
+CP003069.1	377396	378227	toxT	.	+	aln:VC_0838
+# virulence regulation
+CP003069.1	524133	525018	toxR	.	-	ann
+# QRDR genes (coverage prerequisite for future mutation calls)
+CP003069.1	807200	809885	gyrA	.	+	ann
+CP003069.1	2073462	2075748	parC	.	-	ann
+CP003069.1	2075751	2077632	parE	.	-	ann
+# toxins / CTX prophage
+CP003069.1	1027142	1040744	rtxA	.	+	ann
+CP003069.1	1041237	1041612	ctxB	.	-	ann
+CP003069.1	1041608	1042385	ctxA	.	-	aln:VC_1457
+CP003069.1	1042490	1043690	zot	.	-	ann
+CP003069.1	1043686	1043980	ace	.	-	ann
+# O1 antigen
+CP003069.1	2687552	2688226	wbeT	.	+	aln:VC_0258(aligned span; 5' 10bp unaligned, start codon unresolved)
+CP003069.1	2688260	2689493	rfbV	.	-	ann
+# chr2
+CP003070.1	1010364	1012590	hlyA	.	+	aln:VC_A0219

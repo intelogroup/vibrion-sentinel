@@ -1,0 +1,158 @@
+# Vibrion Sentinel — cohort phylogenetics (genome-wide core SNPs)
+#
+# Consumes the per-sample masked consensus FASTAs the lite pipeline already
+# produces (archived to R2 by sentinel-watch for QC-pass runs) and builds a
+# core-SNP tree for a cohort.
+#
+# Why no MSA step: every consensus comes from mapping to the same reference
+# at the same coordinates, so the sequences are already mutually aligned.
+# Stacking them IS the alignment. (The older workflow/scripts/*phylogeny*
+# scripts MAFFT-align concatenated surveillance loci instead -- ~46 kb of
+# largely conserved genes, which for a clonal lineage yields almost no
+# informative sites.)
+#
+#   snakemake -s workflow/cohort_phylo/Snakefile \
+#       --config manifest=cohorts/backtest-2022.tsv consensus_dir=consensus \
+#                outdir=results/cohort/backtest-2022 --cores 4
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(workflow.snakefile)))
+import stack_lib
+
+MANIFEST = config["manifest"]
+CONSENSUS_DIR = config["consensus_dir"]      # local dir of <ACC>.fasta[.gz]
+OUTDIR = config["outdir"]
+THREADS = config.get("threads", 4)
+
+# Sites with more than this fraction of N across the cohort are dropped:
+# consensus carries N wherever per-sample depth was below min_site_depth.
+MAX_SITE_MISSING = config.get("max_site_missing", 0.10)
+# Samples whose consensus is less complete than this are excluded outright.
+MIN_SAMPLE_CALLED = config.get("min_sample_called", 0.80)
+# Regions that distort a clonal tree (prophage/islands/repeats).
+MASK_BED = config.get("mask_bed", f"{workflow.basedir}/phylo_exclude.bed")
+
+
+def cohort_accessions(path):
+    accs = []
+    with open(path) as fh:
+        for line in fh:
+            if line.startswith("#") or not line.strip():
+                continue
+            parts = line.rstrip("\n").split("\t")
+            if parts[0] == "run_accession":   # header
+                continue
+            accs.append(parts[0])
+    return accs
+
+
+ACCESSIONS = cohort_accessions(MANIFEST)
+
+
+rule all:
+    input:
+        f"{OUTDIR}/tree.nwk",
+        f"{OUTDIR}/snp_distances.tsv",
+        f"{OUTDIR}/alignment_stats.json",
+
+
+rule stack_alignment:
+    """Stack reference-coordinate consensus sequences into one alignment,
+    applying the exclusion mask and dropping high-missingness sites."""
+    output:
+        aln=f"{OUTDIR}/core_alignment.fasta",
+        stats=f"{OUTDIR}/alignment_stats.json",
+        dropped=f"{OUTDIR}/excluded_samples.tsv",
+    run:
+        import json
+
+        os.makedirs(OUTDIR, exist_ok=True)
+
+        masked = stack_lib.load_mask(MASK_BED)
+        loaded, excluded = stack_lib.load_and_filter_samples(
+            ACCESSIONS, CONSENSUS_DIR, MIN_SAMPLE_CALLED)
+
+        if len(loaded) < 3:
+            raise RuntimeError(
+                f"only {len(loaded)} usable consensus sequences "
+                f"({len(excluded)} excluded) -- need >=3 for a tree")
+
+        contigs, lengths = stack_lib.validate_coordinates(loaded)
+        skip, n_masked = stack_lib.build_skip_mask(masked, contigs, lengths)
+        accs, cols, total_sites, n_missing_dropped, n_invariant = \
+            stack_lib.build_alignment_columns(
+                loaded, contigs, lengths, skip, MAX_SITE_MISSING)
+
+        with open(output.aln, "w") as out:
+            out.write(stack_lib.format_alignment_fasta(accs, cols))
+        with open(output.dropped, "w") as out:
+            out.write(stack_lib.format_excluded_tsv(excluded))
+
+        stats = {
+            "cohort_manifest": MANIFEST,
+            "samples_in_manifest": len(ACCESSIONS),
+            "samples_used": len(accs),
+            "samples_excluded": len(excluded),
+            "contigs": contigs,
+            "reference_sites": sum(lengths.values()),
+            "sites_masked_by_bed": n_masked,
+            "sites_considered": total_sites,
+            "sites_dropped_missing": n_missing_dropped,
+            "sites_invariant": n_invariant,
+            "variable_sites": len(cols),
+            "max_site_missing": MAX_SITE_MISSING,
+            "min_sample_called": MIN_SAMPLE_CALLED,
+        }
+        with open(output.stats, "w") as out:
+            json.dump(stats, out, indent=2)
+        print(json.dumps(stats, indent=2))
+
+        # A clonal cohort still yields tens of SNPs; near-zero means the
+        # method is wrong (too little sequence, or over-masking), not that
+        # the isolates are identical. Fail loudly rather than emit a tree
+        # built from noise.
+        if len(cols) < 5:
+            raise RuntimeError(
+                f"only {len(cols)} variable sites across {len(accs)} samples -- "
+                "too few for a meaningful tree; check masking and coverage")
+
+
+rule snp_distances:
+    input:
+        aln=rules.stack_alignment.output.aln,
+    output:
+        tsv=f"{OUTDIR}/snp_distances.tsv",
+    run:
+        seqs = stack_lib.parse_fasta(input.aln)
+        accs, dist = stack_lib.pairwise_snp_distances(seqs)
+        with open(output.tsv, "w") as out:
+            out.write(stack_lib.format_distance_matrix(accs, dist))
+
+
+rule tree:
+    """ML tree with ascertainment-bias correction: the alignment is
+    SNP-only, so invariant sites must be accounted for (+ASC) or branch
+    lengths are inflated."""
+    input:
+        aln=rules.stack_alignment.output.aln,
+    output:
+        nwk=f"{OUTDIR}/tree.nwk",
+    log:
+        f"{OUTDIR}/iqtree.log",
+    threads: THREADS
+    shell:
+        """
+        set -euo pipefail
+        # bioconda ships iqtree2 or iqtree3 depending on version; resolve it
+        IQ=""
+        for c in iqtree3 iqtree2 iqtree; do
+            command -v "$c" >/dev/null 2>&1 && {{ IQ="$c"; break; }}
+        done
+        [ -n "$IQ" ] || {{ echo "no iqtree binary found" >&2; exit 1; }}
+        echo "using $IQ" > {log}
+        "$IQ" -s {input.aln} -m GTR+ASC -nt {threads} \
+            -pre {OUTDIR}/iqtree -redo >> {log} 2>&1
+        cp {OUTDIR}/iqtree.treefile {output.nwk}
+        """

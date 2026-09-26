@@ -10,15 +10,31 @@
 
 configfile: "work/config.yaml"  # overridden by --configfile
 
+import sys as _sys
+_sys.path.insert(0, workflow.basedir)
+import report_lib
+import vibrio_extract_lib
+import loci_coverage_lib
+
 ACC = config["accession"]
 REFDIR = config["refdir"]
 OUTDIR = config["outdir"]
 PAIRED = config.get("paired", True)
 THREADS = config.get("threads", 2)
 
+# QC thresholds. Provisional defaults: no organism-specific published
+# standard was found for V. cholerae mapping QC; tune against known-good runs.
+MIN_SITE_DEPTH = config.get("min_site_depth", 10)        # per-position: below -> N in consensus, no variant call
+QC_MIN_MEAN_DEPTH = config.get("qc_min_mean_depth", 20)  # genome-wide mean depth
+QC_MIN_CALLED_PCT = config.get("qc_min_called_pct", 90)  # % of reference called (not masked)
+LOCUS_PRESENT_BREADTH = config.get("locus_present_breadth", 80)  # % of locus with >= 1 read
+LOCUS_ABSENT_BREADTH = config.get("locus_absent_breadth", 20)
+QC_MIN_SPECIES_PURITY = config.get("qc_min_species_purity", 90)  # % of kraken-processed reads classified as V. cholerae
+
 REF = f"{REFDIR}/2010EL-1786.fasta"
 KRAKEN_DB = f"{REFDIR}/kraken2_haiti_custom"
-LOCI_BED = f"{REFDIR}/loci.bed"
+# curated, versioned with the code (not the reference bundle); see file header
+LOCI_BED = config.get("loci_bed", f"{workflow.basedir}/loci_2010EL-1786.bed")
 
 
 rule all:
@@ -29,7 +45,7 @@ rule all:
 rule fastp_qc:
     input:
         r1=config["reads_r1"],
-        r2=config.get("reads_r2", ""),
+        r2=config["reads_r2"] if PAIRED else [],
     output:
         r1=f"{OUTDIR}/01_qc/cleaned_1.fastq.gz",
         r2=f"{OUTDIR}/01_qc/cleaned_2.fastq.gz",
@@ -97,46 +113,14 @@ rule extract_vibrio:
         r2=f"{OUTDIR}/03_vibrio/vibrio_2.fastq.gz",
         stats=f"{OUTDIR}/03_vibrio/extraction_stats.json",
     run:
-        import gzip, json
+        import json, os
 
-        CHOLERAE_TAXID = "666"
-        keep = set()  # read ids (without /1 /2 suffix)
-        n_class, n_keep = 0, 0
-        with open(input.kraken) as fh:
-            for line in fh:
-                parts = line.split("\t")
-                if len(parts) < 3:
-                    continue
-                status, rid, taxid = parts[0], parts[1], parts[2]
-                n_class += 1
-                base = rid.rsplit("/", 1)[0] if "/" in rid else rid
-                if status == "C" and taxid == CHOLERAE_TAXID:
-                    keep.add(base)
-                    n_keep += 1
-                elif status == "U":
-                    keep.add(base)
-                    n_keep += 1
+        keep, n_class, n_keep = vibrio_extract_lib.build_keep_set(input.kraken)
 
-        def filtered(in_path, out_path, suffix):
-            n_in, n_out = 0, 0
-            with gzip.open(in_path, "rt") as fin, gzip.open(out_path, "wt") as fout:
-                while True:
-                    h = fin.readline()
-                    if not h:
-                        break
-                    seq, plus, qual = fin.readline(), fin.readline(), fin.readline()
-                    n_in += 1
-                    base = h[1:].split()[0].rsplit("/", 1)[0]
-                    if base in keep:
-                        fout.write(h + seq + plus + qual)
-                        n_out += 1
-            return n_in, n_out
-
-        import os
         os.makedirs(f"{OUTDIR}/03_vibrio", exist_ok=True)
-        i1, o1 = filtered(input.r1, output.r1, "1")
+        i1, o1 = vibrio_extract_lib.filter_fastq(input.r1, output.r1, keep)
         if PAIRED:
-            i2, o2 = filtered(input.r2, output.r2, "2")
+            i2, o2 = vibrio_extract_lib.filter_fastq(input.r2, output.r2, keep)
         else:
             open(output.r2, "wb").close()  # placeholder; downstream skips R2
             i2, o2 = 0, 0
@@ -201,19 +185,14 @@ rule loci_coverage:
         header = ("#rname\tstartpos\tendpos\tnumreads\tcovbases\t"
                   "coverage\tmeandepth\tmeanbaseq\tmeanmapq\n")
         rows = []
-        with open(LOCI_BED) as fh:
-            for line in fh:
-                if not line.strip() or line.startswith("#"):
+        for _bed_fields, region in loci_coverage_lib.iter_bed_regions(LOCI_BED):
+            r = subprocess.run(
+                ["samtools", "coverage", "-r", region, input.bam],
+                capture_output=True, text=True)
+            for ln in r.stdout.splitlines():
+                if ln.startswith("#rname") or not ln.strip():
                     continue
-                p = line.rstrip("\n").split("\t")
-                region = f"{p[0]}:{int(p[1]) + 1}-{p[2]}"
-                r = subprocess.run(
-                    ["samtools", "coverage", "-r", region, input.bam],
-                    capture_output=True, text=True)
-                for ln in r.stdout.splitlines():
-                    if ln.startswith("#rname") or not ln.strip():
-                        continue
-                    rows.append(ln)
+                rows.append(ln)
         with open(output.txt, "w") as out:
             out.write(header)
             for ln in rows:
@@ -221,31 +200,73 @@ rule loci_coverage:
 
 
 rule call_variants:
+    """Haploid calling (V. cholerae is haploid; bcftools defaults to diploid),
+    then keep only sites with QUAL >= 30 and depth >= MIN_SITE_DEPTH."""
     input:
         bam=rules.bwa_map.output.bam,
     output:
+        raw=f"{OUTDIR}/06_variants/variants.raw.vcf.gz",
         vcf=f"{OUTDIR}/06_variants/variants.vcf.gz",
         snp_count=f"{OUTDIR}/06_variants/snp_count.txt",
+    log:
+        f"{OUTDIR}/06_variants/bcftools.log",
     threads: THREADS
     shell:
         """
         mkdir -p {OUTDIR}/06_variants
         bcftools mpileup -f {REF} --threads {threads} -q 20 -Q 20 \
-            {input.bam} 2>/dev/null | \
-            bcftools call -mv -Oz --threads {threads} -o {output.vcf} 2>/dev/null
-        bcftools index {output.vcf} 2>/dev/null || true
-        bcftools view -v snps {output.vcf} 2>/dev/null | grep -vc "^#" > {output.snp_count} || echo 0 > {output.snp_count}
+            {input.bam} 2> {log} | \
+            bcftools call --ploidy 1 -mv -Oz --threads {threads} \
+            -o {output.raw} 2>> {log}
+        bcftools filter -i 'QUAL>=30 && INFO/DP>={MIN_SITE_DEPTH}' \
+            -Oz -o {output.vcf} {output.raw} 2>> {log}
+        bcftools index -f {output.vcf} 2>> {log}
+        bcftools view -H -v snps {output.vcf} | wc -l > {output.snp_count}
+        """
+
+
+rule depth_mask:
+    """BED of positions with depth < MIN_SITE_DEPTH (incl. contigs with no
+    reads at all), masked to N in the consensus so uncovered sequence is
+    never reported as the reference base. Merge logic lives in
+    scripts/depth_mask.awk (tested independently; see
+    tests/sentinel_lite/test_depth_mask_awk.py)."""
+    input:
+        bam=rules.bwa_map.output.bam,
+    output:
+        bed=f"{OUTDIR}/06_variants/low_depth_mask.bed",
+    shell:
+        """
+        samtools depth -aa -q 20 -Q 20 {input.bam} | \
+            awk -v m={MIN_SITE_DEPTH} -f {workflow.basedir}/scripts/depth_mask.awk \
+            > {output.bed}
         """
 
 
 rule consensus:
+    """SNV-only consensus, so every sample stays on reference coordinates.
+
+    Applying indels would shift sequence length per sample (observed:
+    ~30 indels each, giving chr1 lengths of 3031383/3031386/3031387 across
+    three samples). Cohort analyses stack these sequences positionally and
+    treat column i as the same locus in every sample, which silently breaks
+    the moment lengths diverge. Indels are still called and kept in
+    variants.vcf.gz; they are just not applied here.
+    """
     input:
         vcf=rules.call_variants.output.vcf,
+        mask=rules.depth_mask.output.bed,
     output:
         fa=f"{OUTDIR}/06_variants/consensus.fasta",
+        snv=f"{OUTDIR}/06_variants/variants.snv.vcf.gz",
+    log:
+        f"{OUTDIR}/06_variants/consensus.log",
     shell:
         """
-        bcftools consensus -f {REF} {input.vcf} > {output.fa} 2>/dev/null || cp {REF} {output.fa}
+        bcftools view -v snps -Oz -o {output.snv} {input.vcf} 2> {log}
+        bcftools index -f {output.snv} 2>> {log}
+        bcftools consensus -f {REF} -m {input.mask} {output.snv} \
+            > {output.fa} 2>> {log}
         """
 
 
@@ -263,7 +284,7 @@ rule report:
     output:
         json=f"{OUTDIR}/report.json",
     run:
-        import json as _json, os, re, subprocess
+        import json as _json, os
 
         def load_json(p):
             with open(p) as f:
@@ -273,82 +294,34 @@ rule report:
         before = fp["summary"]["before_filtering"]["total_reads"]
         after = fp["summary"]["after_filtering"]["total_reads"]
 
-        # kraken: V. cholerae (taxid 666) fraction from report
-        cholerae_reads, total_kraken = 0, 0
-        with open(input.kraken_report) as f:
-            for line in f:
-                parts = line.strip().split("\t")
-                if len(parts) >= 6:
-                    pct, n_reads, taxid, name = parts[0], parts[1], parts[4], parts[5].strip()
-                    try:
-                        total_kraken = max(total_kraken, int(n_reads))
-                    except ValueError:
-                        pass
-                    if taxid == "666":
-                        cholerae_reads = int(n_reads)
+        cholerae_reads, _unclass, _root, total_kraken = \
+            report_lib.parse_kraken_report(input.kraken_report)
+        v_cholerae_fraction, species_purity_pct = \
+            report_lib.species_purity(cholerae_reads, total_kraken)
 
         ex = load_json(input.extract_stats)
 
-        # genome-wide coverage: mean depth + breadth from samtools coverage
-        mean_depth, breadth = 0.0, 0.0
-        with open(input.coverage) as f:
-            for line in f:
-                if line.startswith("#rname"):
-                    continue
-                p = line.strip().split("\t")
-                if len(p) >= 7:
-                    try:
-                        mean_depth = float(p[6])
-                        breadth = float(p[5])
-                    except ValueError:
-                        pass
-                    break
+        mean_depth, breadth = report_lib.genome_wide_coverage(input.coverage)
+        with open(input.flagstat) as _f:
+            mapped = report_lib.parse_flagstat_mapped(_f.read())
 
-        mapped = 0
-        m = re.search(r"(\d+) \+ \d+ mapped", open(input.flagstat).read())
-        if m:
-            mapped = int(m.group(1))
+        bed_labels = report_lib.parse_loci_bed(input.loci_bed)
+        loci_calls = report_lib.call_loci(
+            input.loci, bed_labels, LOCUS_PRESENT_BREADTH, LOCUS_ABSENT_BREADTH)
 
-        # loci presence: match BED intervals by coordinates (samtools coverage
-        # -r prints rname/startpos/endpos, not the BED name). Depth >= 5x
-        # over >= 80% of locus = present.
-        bed_labels = {}
-        with open(input.loci_bed) as f:
-            for line in f:
-                if not line.strip() or line.startswith("#"):
-                    continue
-                p = line.strip().split("\t")
-                # BED is 0-based; samtools coverage startpos is 1-based
-                bed_labels[(p[0], int(p[1]) + 1, int(p[2]))] = p[3]
-        loci_calls = {}
-        with open(input.loci) as f:
-            for line in f:
-                if line.startswith("#rname") or not line.strip() or "failed" in line:
-                    continue
-                p = line.strip().split("\t")
-                if len(p) >= 7:
-                    try:
-                        key = (p[0], int(p[1]), int(p[2]))
-                        depth, cov = float(p[6]), float(p[5])
-                    except ValueError:
-                        continue
-                    name = bed_labels.get(key, f"{p[0]}:{p[1]}-{p[2]}")
-                    loci_calls[name] = {
-                        "mean_depth": round(depth, 2),
-                        "breadth_pct": round(cov, 2),
-                        "present": bool(depth >= 5 and cov >= 80),
-                    }
+        snps = report_lib.read_snp_count(input.snp_count)
+        cons_len, cons_n, called_pct = report_lib.consensus_stats(input.consensus)
 
-        try:
-            snps = int(open(input.snp_count).read().strip())
-        except ValueError:
-            snps = 0
-
-        cons_len = 0
-        with open(input.consensus) as f:
-            for line in f:
-                if not line.startswith(">"):
-                    cons_len += len(line.strip())
+        # QC gate: a failing run still gets a report (for inspection), but its
+        # variants/consensus/loci calls must not be treated as results.
+        qc_status, qc_reasons = report_lib.evaluate_qc(
+            mean_depth, called_pct, species_purity_pct,
+            {
+                "min_mean_depth": QC_MIN_MEAN_DEPTH,
+                "min_called_pct": QC_MIN_CALLED_PCT,
+                "min_species_purity": QC_MIN_SPECIES_PURITY,
+            },
+        )
 
         report = {
             "pipeline": "vibrion-sentinel-lite",
@@ -363,7 +336,7 @@ rule report:
             "classification": {
                 "kraken_db": "kraken2_haiti_custom",
                 "v_cholerae_reads": cholerae_reads,
-                "v_cholerae_fraction": round(cholerae_reads / total_kraken, 4) if total_kraken else 0.0,
+                "v_cholerae_fraction": round(v_cholerae_fraction, 4),
             },
             "mapping": {
                 "mapped_reads": mapped,
@@ -373,9 +346,24 @@ rule report:
             "variants": {"snps_vs_7pet": snps},
             "surveillance_loci": loci_calls,
             "consensus_length": cons_len,
+            "consensus_called_pct": round(called_pct, 2),
+            "qc": {
+                "status": qc_status,
+                "reasons": qc_reasons,
+                "thresholds": {
+                    "locus_present_breadth": LOCUS_PRESENT_BREADTH,
+                    "locus_absent_breadth": LOCUS_ABSENT_BREADTH,
+                    "min_site_depth": MIN_SITE_DEPTH,
+                    "min_mean_depth": QC_MIN_MEAN_DEPTH,
+                    "min_called_pct": QC_MIN_CALLED_PCT,
+                    "min_species_purity": QC_MIN_SPECIES_PURITY,
+                },
+            },
             "notes": "Lite tier: mapping-based, no de novo assembly. "
-                     "Serogroup/biotype inferred from loci presence; "
-                     "confirm novel signals with full pipeline.",
+                     "Consensus positions below min_site_depth are N. "
+                     "If qc.status is 'fail', variants, consensus and loci "
+                     "calls are not interpretable. Loci BED is provisional "
+                     "and does not yet support serogroup/biotype calls.",
         }
         os.makedirs(OUTDIR, exist_ok=True)
         with open(output.json, "w") as f:
