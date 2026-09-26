@@ -1,0 +1,95 @@
+name: Cohort phylogenetics
+
+# Builds a genome-wide core-SNP tree for a cohort from the per-sample
+# consensus sequences archived to R2 by sentinel-watch (QC-pass only).
+#
+# Prerequisite: the cohort's accessions must already have been processed by
+# sentinel-watch, and R2 secrets must be configured -- consensus sequences
+# are the input here, not something this workflow can regenerate.
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: "Cohort manifest path (e.g. cohorts/backtest-2022.tsv)"
+        required: true
+        default: "cohorts/backtest-2022.tsv"
+      max_site_missing:
+        description: "Drop alignment sites with more than this fraction of N"
+        required: false
+        default: "0.10"
+      min_sample_called:
+        description: "Exclude samples whose consensus is less complete than this"
+        required: false
+        default: "0.80"
+
+permissions:
+  contents: read
+
+jobs:
+  phylo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          micromamba-version: "latest"
+          environment-file: workflow/envs/cohort_phylo.yaml
+          cache-environment: true
+          environment-name: cohort-phylo
+
+      - name: Fetch consensus sequences from R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${R2_BUCKET:-}" ]; then
+            echo "::error::R2_BUCKET not set -- consensus sequences are this workflow's input and cannot be regenerated here"
+            exit 1
+          fi
+          mkdir -p consensus
+          MANIFEST="${{ inputs.manifest }}"
+          MISSING=0
+          FOUND=0
+          while IFS=$'\t' read -r ACC _; do
+            case "$ACC" in \#*|run_accession|"") continue ;; esac
+            if aws s3 cp "s3://${R2_BUCKET}/consensus/${ACC}.fasta.gz" \
+                 "consensus/${ACC}.fasta.gz" --endpoint-url "$AWS_ENDPOINT_URL" 2>/dev/null; then
+              FOUND=$((FOUND+1))
+            else
+              echo "no archived consensus for ${ACC} (not processed, or QC-fail)"
+              MISSING=$((MISSING+1))
+            fi
+          done < "$MANIFEST"
+          echo "consensus fetched: $FOUND, missing: $MISSING"
+          [ "$FOUND" -ge 3 ] || { echo "::error::only $FOUND consensus sequences -- need >=3"; exit 1; }
+
+      - name: Build core-SNP tree
+        shell: micromamba-shell {0}
+        run: |
+          set -euo pipefail
+          MANIFEST="${{ inputs.manifest }}"
+          NAME="$(basename "$MANIFEST" .tsv)"
+          snakemake -s workflow/cohort_phylo/Snakefile \
+            --config manifest="$MANIFEST" consensus_dir=consensus \
+              outdir="results/cohort/${NAME}" \
+              max_site_missing=${{ inputs.max_site_missing }} \
+              min_sample_called=${{ inputs.min_sample_called }} \
+            --cores 4 --printshellcmds
+          echo "=== alignment stats ==="
+          cat "results/cohort/${NAME}/alignment_stats.json"
+          echo "=== tree ==="
+          cat "results/cohort/${NAME}/tree.nwk"
+
+      - name: Upload cohort results
+        uses: actions/upload-artifact@v4
+        with:
+          name: cohort-${{ github.run_id }}
+          path: results/cohort/
+          if-no-files-found: error
+          retention-days: 90
