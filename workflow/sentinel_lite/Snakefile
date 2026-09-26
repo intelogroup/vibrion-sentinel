@@ -23,6 +23,7 @@ QC_MIN_MEAN_DEPTH = config.get("qc_min_mean_depth", 20)  # genome-wide mean dept
 QC_MIN_CALLED_PCT = config.get("qc_min_called_pct", 90)  # % of reference called (not masked)
 LOCUS_PRESENT_BREADTH = config.get("locus_present_breadth", 80)  # % of locus with >= 1 read
 LOCUS_ABSENT_BREADTH = config.get("locus_absent_breadth", 20)
+QC_MIN_SPECIES_PURITY = config.get("qc_min_species_purity", 90)  # % of kraken-processed reads classified as V. cholerae
 
 REF = f"{REFDIR}/2010EL-1786.fasta"
 KRAKEN_DB = f"{REFDIR}/kraken2_haiti_custom"
@@ -316,19 +317,31 @@ rule report:
         before = fp["summary"]["before_filtering"]["total_reads"]
         after = fp["summary"]["after_filtering"]["total_reads"]
 
-        # kraken: V. cholerae (taxid 666) fraction from report
-        cholerae_reads, total_kraken = 0, 0
+        # kraken: V. cholerae (taxid 666) fraction from report.
+        # Columns: pct, clade_reads, direct_reads, rank_code, taxid, name.
+        # Total reads Kraken actually processed = unclassified (taxid "0")
+        # clade count + root (taxid "1") clade count (root's clade count is
+        # every classified read). The previous max(clade_reads) over all
+        # rows picked whichever of those two happened to be larger, which
+        # is not the total and made this fraction meaningless regardless of
+        # how many species the DB could tell apart.
+        cholerae_reads, unclassified_reads, root_reads = 0, 0, 0
         with open(input.kraken_report) as f:
             for line in f:
                 parts = line.strip().split("\t")
                 if len(parts) >= 6:
-                    pct, n_reads, taxid, name = parts[0], parts[1], parts[4], parts[5].strip()
+                    n_reads, taxid = parts[1], parts[4]
                     try:
-                        total_kraken = max(total_kraken, int(n_reads))
+                        n_reads = int(n_reads)
                     except ValueError:
-                        pass
+                        continue
                     if taxid == "666":
-                        cholerae_reads = int(n_reads)
+                        cholerae_reads = n_reads
+                    elif taxid == "0":
+                        unclassified_reads = n_reads
+                    elif taxid == "1":
+                        root_reads = n_reads
+        total_kraken = unclassified_reads + root_reads
 
         ex = load_json(input.extract_stats)
 
@@ -411,11 +424,16 @@ rule report:
 
         # QC gate: a failing run still gets a report (for inspection), but its
         # variants/consensus/loci calls must not be treated as results.
+        v_cholerae_fraction = cholerae_reads / total_kraken if total_kraken else 0.0
+        species_purity_pct = 100.0 * v_cholerae_fraction
+
         qc_reasons = []
         if mean_depth < QC_MIN_MEAN_DEPTH:
             qc_reasons.append(f"mean_depth {mean_depth:.2f} < {QC_MIN_MEAN_DEPTH}")
         if called_pct < QC_MIN_CALLED_PCT:
             qc_reasons.append(f"called_pct {called_pct:.2f} < {QC_MIN_CALLED_PCT}")
+        if species_purity_pct < QC_MIN_SPECIES_PURITY:
+            qc_reasons.append(f"species_purity {species_purity_pct:.2f} < {QC_MIN_SPECIES_PURITY}")
 
         report = {
             "pipeline": "vibrion-sentinel-lite",
@@ -430,7 +448,7 @@ rule report:
             "classification": {
                 "kraken_db": "kraken2_haiti_custom",
                 "v_cholerae_reads": cholerae_reads,
-                "v_cholerae_fraction": round(cholerae_reads / total_kraken, 4) if total_kraken else 0.0,
+                "v_cholerae_fraction": round(v_cholerae_fraction, 4),
             },
             "mapping": {
                 "mapped_reads": mapped,
@@ -450,6 +468,7 @@ rule report:
                     "min_site_depth": MIN_SITE_DEPTH,
                     "min_mean_depth": QC_MIN_MEAN_DEPTH,
                     "min_called_pct": QC_MIN_CALLED_PCT,
+                    "min_species_purity": QC_MIN_SPECIES_PURITY,
                 },
             },
             "notes": "Lite tier: mapping-based, no de novo assembly. "
