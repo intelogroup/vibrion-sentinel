@@ -1,14 +1,105 @@
 # Vibrion Sentinel
 
-**Genomic Surveillance Pipeline for *Vibrio cholerae* — v2.0**
+**Open genomic-epidemiological intelligence for *Vibrio cholerae* in Haiti.**
 
-Vibrion Sentinel is a field-deployable Snakemake pipeline for cholera genomic surveillance. It accepts raw Illumina or Nanopore FASTQ reads and produces a full public-health report: serotype, toxin genotype, AMR profile, CTXφ integration status, phylogenetic placement, and a **Vibrio Resurgence Score (VRS)**.
+Haiti's 2010 cholera outbreak killed roughly 10,000 people. After elimination was declared in 2019, cholera came back in 2022. Vibrion Sentinel exists so the next resurgence is caught in public sequence data as early as possible: it watches every new *V. cholerae* genome linked to Haiti, characterizes it automatically, and interprets it against the full 2010–2022 historical record.
 
-Originally developed to support the 2022 Haiti resurgence response. v2.0 adds reference-agnostic triage, AI-assisted anomaly detection (HyenaDNA + Evo2), and a tiered memory management system for deployment on laptops down to 6GB RAM.
+This is not a case-count dashboard. It is a **sequence-first early-warning system** — new public genomes in, population context out.
 
 ---
 
-## Quick Start
+## How it works
+
+```
+NCBI SRA / ENA ── every 6 hours ──► Watcher (scripts/watch_sra.py)
+                                          │ new accessions
+                                          ▼
+                     Lite pipeline, one GitHub Actions job per sample
+                       ENA download → QC → map to 2010 Haiti reference
+                       → SNP distance → toxin/virulence loci
+                       → consensus genome → report.json
+                                          │
+              ┌───────────────────────────┼───────────────────────────┐
+              ▼                           ▼                           ▼
+     Supabase `sentinel_runs`      R2 archive                  GitHub artifacts
+     (one JSON row / sample)   raw reads + consensus          per-run report.json
+```
+
+### 1. Watcher
+
+`.github/workflows/sentinel-watch.yml` (schedule `17 */6 * * *`) runs `scripts/watch_sra.py`, which queries NCBI E-utilities for *Vibrio cholerae* sequencing runs in two priority tiers:
+
+- **haiti** — any record linked to Haiti/Caribbean, any date, not yet seen
+- **global** — new records from the last 7 days
+
+New accessions are diffed against `state/seen_accessions.txt` and dispatched as a processing matrix (up to 10 per cycle, 2 concurrent jobs). Processed accessions are committed back to the state file, so nothing is ever processed twice. Transient NCBI rate-limits (HTTP 429) are retried with exponential backoff honoring the `Retry-After` header, and an optional `NCBI_API_KEY` repo secret raises the E-utilities limit from 3 to 10 req/s.
+
+### 2. Lite pipeline (`workflow/sentinel_lite/`)
+
+Each accession gets a fast, reference-based characterization:
+
+- **QC** — mean depth, consensus called %, *V. cholerae* species purity (Kraken2)
+- **Mapping** against 2010EL-1786, the 2010 Haiti outbreak reference (7PET lineage)
+- **SNP distance** vs the reference — the primary divergence signal
+- **Surveillance loci** — cholera toxin cluster (*ctxA*, *ctxB*, *zot*, *ace*), *tcpA*, *toxR*, O1 antigen genes (*wbeT*, *rfbV*), and more
+- **Consensus genome** — archived for downstream phylogeny
+
+Output is a single `report.json` per sample: machine-readable, pushed to Supabase, with a per-run artifact on the workflow run. Samples that fail QC are reported as failed, not silently dropped. Haiti-tier raw reads go to `r2://raw/haiti/{ACC}/`; QC-pass consensus genomes to `r2://consensus/{ACC}.fasta.gz`.
+
+### 3. Historical cohorts (`cohorts/`)
+
+| Cohort | Runs | Span | Source |
+|--------|------|------|--------|
+| `haiti-baseline.tsv` | 432 | 2010–2022 | 11 BioProjects; ENA query `tax_eq(666) AND country="Haiti*" AND instrument_platform="ILLUMINA" AND library_strategy="WGS"` |
+| `backtest-2022.tsv` | 25 | Oct–Nov 2022 | PRJNA900623, the published 2022 resurgence set |
+
+The baseline is the empirical anchor: every new genome is interpreted against what Haitian *V. cholerae* actually looked like across the outbreak (2010–11), the endemic years (2013–18), and the 2022 comeback. Construction notes and caveats: [docs/HAITI_COHORTS.md](docs/HAITI_COHORTS.md).
+
+### 4. Back-test — would we have caught 2022 early?
+
+`cohorts/backtest-2022.expect.yaml` encodes the published findings ([JCM 2023](https://journals.asm.org/doi/full/10.1128/jcm.00142-23); [EID 2023](https://wwwnc.cdc.gov/eid/article/29/10/23-0554_article)) as machine-checkable expectations: the 2022 isolates were toxigenic O1, homogeneous, and closely related to 2012–2019 Haitian strains. `scripts/backtest_report.py` tests the pipeline's actual outputs against those expectations. **A failure here is a finding about the pipeline and must be reported as such, not silently retuned until it passes.**
+
+The question this project answers: *given the 2010–2018 anchor, at what point in October 2022 would the current pipeline have raised the alarm?* Note the 2022 signal is not a huge SNP distance — it is a new toxigenic O1 cluster appearing after a multi-year gap.
+
+### 5. Phylogeny (`.github/workflows/cohort-phylo.yml`)
+
+Core-SNP phylogeny over cohort consensus genomes — for placing new samples in the population tree rather than judging them by reference distance alone.
+
+---
+
+## Quick start
+
+### Check a watcher run against the published record
+
+```bash
+# download the per-sample artifacts from a sentinel-watch run, then:
+python3 scripts/backtest_report.py \
+  --expect cohorts/backtest-2022.expect.yaml \
+  --results-dir <artifacts dir>
+```
+
+### Force-process accessions
+
+Actions → **Vibrion sentinel watch** → Run workflow → `force_accessions: SRR22265444,SRR22265443` (comma-separated), `force_priority: haiti`.
+
+### Query the data
+
+- **Supabase** `sentinel_runs`: one row per sample — accession, priority, QC status/reasons, depth, breadth, `snps_vs_7pet`, surveillance loci, and the full `report.json`.
+- **R2**: raw Haiti-tier reads and QC-pass consensus genomes (see paths above).
+- **GitHub**: per-run `sentinel-{ACC}` artifacts with `report.json`.
+
+### Run the watcher search locally
+
+```bash
+python3 scripts/watch_sra.py --state state/seen_accessions.txt \
+  --days 7 --max-new 10 --out-matrix /tmp/matrix.json
+```
+
+---
+
+## The v2.0 laboratory pipeline
+
+`workflow/Snakefile` is the original 45-rule Snakemake pipeline: deep per-sample characterization — serotype, *ctxB* allele, CTXφ integration, SXT element assembly, AMR (targeted + RGI), phenotype prediction, Pilon-polished consensus, MAFFT/FastTree phylogeny. It remains the deep-dive engine for samples the lite pipeline flags. Region configs live alongside it (`workflow/haiti_2026_config.yaml`, `workflow/haiti_resurgence_paired.yaml`, …).
 
 ```bash
 # 1. Clone
@@ -22,200 +113,25 @@ conda activate vibrion
 # 3. Download databases (~10GB total)
 bash scripts/setup_databases.sh
 
-# 4. Place reads
-cp /path/to/your/sample.fastq.gz data/raw_reads/MY_SAMPLE.fastq.gz
-
-# 5. Run
-export NVIDIA_API_KEY="nvapi-..."   # optional — enables cloud Evo2 escalation
+# 4. Run (laboratory mode)
 bash scripts/run_pipeline.sh --config workflow/test_config.yaml --cores 8
 ```
 
 Results → `data/pipeline_output/MY_SAMPLE/08_comprehensive_report/surveillance_report.md`
 
----
+System requirements: 8 GB RAM minimum (16 GB recommended), 2+ CPU cores, 15 GB free disk; the pipeline auto-selects a memory tier (FULL / BALANCED / BUNKER / EMERGENCY). HyenaDNA local triage setup: [docs/HYENADNA_SETUP.md](docs/HYENADNA_SETUP.md).
 
-## System Requirements
-
-| Component | Minimum | Recommended |
-|-----------|---------|-------------|
-| RAM | 8 GB | 16 GB |
-| CPU cores | 2 | 8 |
-| Disk | 15 GB free | 30 GB free |
-| OS | Linux, macOS | Linux, macOS |
-| Conda/Mamba | required | mamba (faster) |
-
-The pipeline auto-detects available RAM and selects a memory tier (FULL / BALANCED / BUNKER / EMERGENCY). See `workflow/test_config.yaml` for tier definitions.
+> AI/ML placement is deliberate: rigorous genomics and epidemiology come first. Optional model-based scoring only ever ranks already-detected candidates — it never gates, suppresses, or creates findings.
 
 ---
 
-## Installation
+## Roadmap
 
-### 1. Conda environment
-
-```bash
-conda env create -f environment.yml
-conda activate vibrion
-```
-
-Tools installed: `snakemake`, `fastp`, `bwa`, `samtools`, `kraken2`, `bcftools`, `spades`, `pilon`, `sourmash`, `mmseqs2`, `snpEff`, `mafft`, `FastTree`, `hostile`.
-
-### 2. HyenaDNA (AI triage — Tier 1)
-
-HyenaDNA runs locally for genomic anomaly scoring without cloud API calls. See **[docs/HYENADNA_SETUP.md](docs/HYENADNA_SETUP.md)** for the full guide.
-
-**TL;DR:** included in `environment.yml`. Verify with:
-```bash
-python3 -c "from transformers import AutoTokenizer; print('HyenaDNA deps OK')"
-```
-
-To disable and fall back to k-mer-only triage:
-```yaml
-triage:
-  hyena_use_real_model: false
-```
-
-### 3. Databases
-
-```bash
-bash scripts/setup_databases.sh
-```
-
-| Database | Size | Purpose |
-|----------|------|---------|
-| Kraken2 standard 8GB | 8.0 GB | Taxonomic classification |
-| Kraken2 serogroup DB | ~20 MB | O1/O139 serogroup probing (built locally) |
-| MMseqs2 SwissProt | ~1.0 GB | Unclassified read rescue |
-| Reference genomes | ~100 MB | 2010EL-1786, Haiti 2022, global panel |
-| Global references | ~2.1 GB | DRC-2024, Yemen, India Wave3, Malawi, S. Africa, Bangladesh |
-| Core alignment | ~8 MB | Phylogenetic backbone |
-
-Skip large downloads for quick testing:
-```bash
-bash scripts/setup_databases.sh --skip-kraken --skip-mmseqs
-```
-
----
-
-## NVIDIA API Key (optional)
-
-Evo2 cloud escalation is **optional**. The pipeline runs fully locally — Evo2 is only called when Tier 0 (sourmash k-mer) + Tier 1 (HyenaDNA) triage flags a potential anomaly. Most samples never reach it.
-
-Get a free key at **https://build.nvidia.com/arc/evo2** then:
-```bash
-export NVIDIA_API_KEY="nvapi-..."
-```
-
-> **Security:** Never commit your key. All configs in this repo have `nvidia_api_key: ""`.  
-> The runner script injects it at runtime via `--config nvidia_api_key=$NVIDIA_API_KEY`.
-
----
-
-## Usage
-
-```bash
-# Validate first (dry-run)
-bash scripts/run_pipeline.sh --config workflow/test_config.yaml --dry-run
-
-# Full run
-bash scripts/run_pipeline.sh --config workflow/test_config.yaml --cores 8
-```
-
-### Writing a config
-
-```yaml
-samples_dir: "data/raw_reads"
-output_dir: "data/pipeline_output"
-reference_dir: "data/references"
-global_references_dir: "data/global_references"
-kraken_db: "data/kraken2_standard_8gb"
-serogroup_db: "data/kraken2_serogroup"
-threads: 8
-memory_mb: 16000
-pipeline_mode: "LABORATORY_FULL"
-nvidia_api_key: ""   # do not hardcode — injected by run_pipeline.sh
-samples:
-  - MY_SAMPLE   # matches data/raw_reads/MY_SAMPLE.fastq.gz
-                # or MY_SAMPLE_1.fastq.gz + MY_SAMPLE_2.fastq.gz (paired-end)
-```
-
-### Input formats
-
-| Format | File convention |
-|--------|----------------|
-| Single-end | `data/raw_reads/SAMPLE.fastq.gz` |
-| Paired-end | `data/raw_reads/SAMPLE_1.fastq.gz` + `SAMPLE_2.fastq.gz` |
-| Nanopore | single-end `.fastq.gz` — platform auto-detected |
-
----
-
-## Pipeline Overview
-
-```
-Raw FASTQ
-  ├─ fastp QC
-  ├─ hostile (human decontamination)
-  ├─ Kraken2 classification
-  ├─ Vibrio read extraction + MMseqs2 rescue of unclassified reads
-  ├─ Serogroup detection (O1 / O139 / NOVC)
-  ├─ BWA alignment → auto-selected regional reference
-  ├─ Variant calling (bcftools) + SnpEff annotation
-  ├─ CTXφ phage integration detection (dual dif-site)
-  ├─ SXT element assembly
-  ├─ AMR profiling (targeted + RGI)
-  ├─ Phenotypic prediction (biofilm, motility, rugose state)
-  ├─ Consensus genome + Pilon polishing
-  ├─ Phylogenetic placement (MAFFT + FastTree)
-  ├─ Triage: Tier 0 sourmash → Tier 1 HyenaDNA → Tier 2 Evo2 (cloud, if needed)
-  ├─ VRS (Vibrio Resurgence Score) calculation
-  └─ Comprehensive surveillance report (Markdown + JSON)
-```
-
----
-
-## Outputs
-
-All outputs are in `data/pipeline_output/<SAMPLE_ID>/`:
-
-| Directory | Key files |
-|-----------|-----------|
-| `08_comprehensive_report/` | `surveillance_report.md`, `vrs_score.json` |
-| `09_consensus/` | `*_polished.fasta`, `ctx_integration.json`, `platform_detection.json` |
-| `05_variants/` | `*.vcf.gz`, `snp_report.json`, `haplotypes.json`, `public_health_typing.json` |
-| `06_amr/` | `amr_report.json`, `rgi_report.json`, `phenotype_report.json` |
-| `07_triage/` | `triage_decision.json`, `tier0_sourmash.json`, `local_triage.json` |
-| `10_phylogeny/` | `tree.nwk`, `tree.png` |
-
----
-
-## Test with public SRA data
-
-```bash
-# Install SRA tools: conda install -c bioconda sra-tools
-fasterq-dump SRR32625477 --outdir data/raw_reads/ --threads 4
-gzip data/raw_reads/SRR32625477_1.fastq data/raw_reads/SRR32625477_2.fastq
-
-bash scripts/run_pipeline.sh --config workflow/test_config.yaml --cores 8
-```
-
-**Expected results for SRR32625477** (Haiti 2025, real WGS, ~7M reads):
-- VRS: **33 / 🟢 LOW**
-- Serotype: **Ogawa**, Toxin: **ctxB7**
-- CTXφ: **NOT_DETECTED**, AMR genes: **0**
-- Evo2 trajectory: **STABLE_ENDEMIC**
-- Runtime: ~20 min on 8 cores / 16GB RAM
-
----
-
-## Troubleshooting
-
-| Issue | Fix |
-|-------|-----|
-| `WildcardError: NVIDIA_API_KEY` | Never put `"${VAR}"` in YAML — use `""` and pass via `--config` at runtime |
-| Workspace locked (`.snakemake/locks/`) | `rm -f .snakemake/locks/*.lock` — stale lock from a killed run |
-| OOM during Kraken2 | Use `kraken_db: "data/kraken2_serogroup"` or set `memory_management.force_tier: "BALANCED"` |
-| Pipeline stops mid-run | Rerun — `run_pipeline.sh` always passes `--rerun-incomplete` |
-| HyenaDNA not loading | See [docs/HYENADNA_SETUP.md](docs/HYENADNA_SETUP.md) |
-| Low coverage warnings | Expected for <50k read samples — pipeline completes, just flags LOW_COVERAGE |
+- **Strain database** — curated Postgres/PostgREST store: every Haitian/Caribbean isolate with collection date, department, clinical vs environmental origin, lineage, AMR, toxin, QC flags
+- **Population analytics** — cumulative core-SNP alignment, time-scaled tree, lineage assignment, AMR/toxin trend analysis
+- **Anomaly detection** — stats-first flags: novel lineage emergence, AMR acquisition, SNP-distance outliers, geographic jumps
+- **Outputs** — public dashboard + monthly *"What changed in the Haitian V. cholerae population?"* brief
+- **Manuscript** — methods paper + data note on the curated strain set
 
 ---
 
@@ -223,8 +139,12 @@ bash scripts/run_pipeline.sh --config workflow/test_config.yaml --cores 8
 
 If you use Vibrion Sentinel in published work:
 
-> Vibrion Sentinel v2.0 — Genomic Surveillance for *Vibrio cholerae*.  
+> Vibrion Sentinel — open genomic-epidemiological intelligence for *Vibrio cholerae* in Haiti.
 > https://github.com/intelogroup/vibrion-sentinel
+
+Key published references for the 2022 resurgence data:
+- J Clin Microbiol 2023 — https://journals.asm.org/doi/full/10.1128/jcm.00142-23
+- Emerg Infect Dis 2023 — https://wwwnc.cdc.gov/eid/article/29/10/23-0554_article
 
 ---
 
