@@ -41,6 +41,11 @@ jobs:
 
       - name: Find new accessions
         id: emit
+        env:
+          # Optional: free NCBI API key (https://www.ncbi.nlm.nih.gov/account/)
+          # raises the E-utilities limit 3 -> 10 req/s. Unset = still works,
+          # with retry/backoff on 429.
+          NCBI_API_KEY: ${{ secrets.NCBI_API_KEY }}
         run: |
           if [ -n "${{ inputs.force_accessions }}" ]; then
             echo "Forced accessions: ${{ inputs.force_accessions }}"

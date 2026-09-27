@@ -9,6 +9,12 @@ Priority tiers:
   - haiti: accession linked to Haiti/Caribbean (any date, not yet seen)
   - global: new in the last --days days
 
+NCBI etiquette / rate limits:
+  - Without an API key: 3 requests/second. Shared GitHub runner IPs get
+    throttled with HTTP 429 -- retried here with exponential backoff.
+  - With NCBI_API_KEY set (free at https://www.ncbi.nlm.nih.gov/account/):
+    10 requests/second. The key travels as a query param, never logged.
+
 Usage:
     python3 scripts/watch_sra.py --state state/seen_accessions.txt \
         --days 7 --max-new 10 --out-matrix /tmp/matrix.json
@@ -16,9 +22,12 @@ Usage:
 
 import argparse
 import json
+import os
+import random
 import re
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -27,21 +36,71 @@ EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 TOOL = "vibrion-sentinel"
 EMAIL = "vibrion-sentinel@intelogroup.example"  # NCBI etiquette; replace with real contact
 
+# Retry policy for transient NCBI failures (HTTP 429 rate-limit, 5xx).
+# A single 429 killed an entire scheduled watcher cycle on 2026-09-27;
+# the watcher must ride these out instead of failing the run.
+MAX_ATTEMPTS = 5
+BASE_DELAY_S = 2.0
+MAX_DELAY_S = 60.0
+RETRYABLE = {429, 500, 502, 503, 504}
+
+
+def _api_key():
+    """Optional NCBI API key from the environment (10 req/s vs 3)."""
+    return os.environ.get("NCBI_API_KEY", "").strip()
+
+
+def _params(params, json_mode):
+    p = dict(params, tool=TOOL, email=EMAIL)
+    if json_mode:
+        p["retmode"] = "json"
+    key = _api_key()
+    if key:
+        p["api_key"] = key
+    return p
+
+
+def _backoff_delay(attempt, retry_after=None):
+    if retry_after is not None:
+        delay = retry_after
+    else:
+        delay = min(BASE_DELAY_S * (2 ** attempt), MAX_DELAY_S)
+    return delay * (0.8 + 0.4 * random.random())  # +/-20% jitter
+
+
+def _http_get(url):
+    """GET with retry on 429/5xx. Honors the Retry-After response header.
+    Raises the last HTTPError after MAX_ATTEMPTS."""
+    for attempt in range(MAX_ATTEMPTS):
+        req = urllib.request.Request(url, headers={"User-Agent": TOOL})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return r.read(), r.headers
+        except urllib.error.HTTPError as e:
+            if e.code not in RETRYABLE or attempt == MAX_ATTEMPTS - 1:
+                raise
+            retry_after = None
+            try:
+                retry_after = float(e.headers.get("Retry-After"))
+            except (TypeError, ValueError):
+                pass
+            delay = _backoff_delay(attempt, retry_after)
+            print(f"watch_sra: NCBI HTTP {e.code}, "
+                  f"retry {attempt + 1}/{MAX_ATTEMPTS} in {delay:.1f}s",
+                  file=sys.stderr)
+            time.sleep(delay)
+
 
 def eu(path, params):
-    params = dict(params, tool=TOOL, email=EMAIL, retmode="json")
-    url = f"{EUTILS}/{path}?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(url, headers={"User-Agent": TOOL})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return json.loads(r.read().decode())
+    url = f"{EUTILS}/{path}?" + urllib.parse.urlencode(_params(params, True))
+    body, _ = _http_get(url)
+    return json.loads(body.decode())
 
 
 def eu_xml(path, params):
-    params = dict(params, tool=TOOL, email=EMAIL)
-    url = f"{EUTILS}/{path}?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(url, headers={"User-Agent": TOOL})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return ET.fromstring(r.read())
+    url = f"{EUTILS}/{path}?" + urllib.parse.urlencode(_params(params, False))
+    body, _ = _http_get(url)
+    return ET.fromstring(body)
 
 
 def esearch_ids(term, reldate=None):
