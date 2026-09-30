@@ -70,7 +70,9 @@ jobs:
     needs: watch
     if: needs.watch.outputs.new_count != '0'
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    # GitHub-hosted jobs cap at 6h; the lite pipeline on 2 cores needed
+    # >5h for SRR22351615 (killed at the old 300-min timeout, 2026-09-29).
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -101,8 +103,26 @@ jobs:
           ROOT="$PWD"
           ACC="${{ matrix.accession }}"
           mkdir -p "work/${ACC}"
-          META=$(curl -s "https://www.ebi.ac.uk/ena/portal/api/filereport?accession=${ACC}&result=read_run&fields=run_accession,fastq_ftp,library_layout&format=json")
-          LAYOUT=$(ACC="$ACC" META="$META" python3 - <<'EOF'
+          # --- 1. ENA metadata. The portal API flakes (curl exit 56 killed
+          # SRR22351616 on 2026-09-29); retry hard here instead of failing
+          # the job on a transient blip. Empty/unparseable after retries
+          # falls through to the SRA Toolkit fallback below. ---
+          META=""
+          for attempt in 1 2 3 4 5; do
+            if META=$(curl -sS --fail --retry 2 --retry-all-errors \
+                           --connect-timeout 20 --max-time 180 \
+                           "https://www.ebi.ac.uk/ena/portal/api/filereport?accession=${ACC}&result=read_run&fields=run_accession,fastq_ftp,library_layout&format=json") \
+               && printf '%s' "$META" | python3 -c "import json,sys; json.load(sys.stdin)" 2>/dev/null; then
+              break
+            fi
+            echo "::warning::ENA metadata fetch failed for ${ACC} (attempt ${attempt}/5)"
+            META=""
+            [ "$attempt" -lt 5 ] && sleep 30
+          done
+          LAYOUT="MISSING"
+          URLS=""
+          if [ -n "$META" ]; then
+            LAYOUT=$(ACC="$ACC" META="$META" python3 - <<'EOF'
           import json, os
           d = json.loads(os.environ["META"])
           if not d:
@@ -113,28 +133,76 @@ jobs:
               with open(f"work/{os.environ['ACC']}/ena.json", "w") as f:
                   json.dump(r, f)
           EOF
-          )
-          if [ "$LAYOUT" = "MISSING" ]; then
-            echo "No ENA record for $ACC — trying SRA Toolkit"
-            cd "work/${ACC}"
-            fasterq-dump "$ACC" --threads 2 --progress
-            ls ${ACC}*.fastq | head
-            gzip -1 ${ACC}*.fastq
-            if [ -f "${ACC}_2.fastq.gz" ]; then PAIRED=true; else PAIRED=false; fi
-            R1="$(ls ${ACC}_1.fastq.gz 2>/dev/null || ls ${ACC}.fastq.gz)"
-            R2="$(ls ${ACC}_2.fastq.gz 2>/dev/null || echo '')"
-            cd "$ROOT"
-          else
-            PAIRED="true"; [ "$LAYOUT" = "SINGLE" ] && PAIRED="false"
-            URLS=$(python3 -c "import json; print(json.load(open('work/${ACC}/ena.json'))['fastq_ftp'])")
+            )
+            URLS=$(python3 -c "import json; print(json.load(open('work/${ACC}/ena.json')).get('fastq_ftp') or '')")
+          fi
+          # --- 2a. ENA fastq download. Each file is size- and gzip-verified;
+          # any failure drops to the SRA Toolkit fallback below. ---
+          ena_ok=false
+          PAIRED="true"
+          R1=""; R2=""
+          if [ "$LAYOUT" != "MISSING" ] && [ -n "$URLS" ]; then
+            [ "$LAYOUT" = "SINGLE" ] && PAIRED="false"
+            ena_ok=true
             i=1
             for u in $(echo "$URLS" | tr ';' ' '); do
-              curl -sL --retry 3 -o "work/${ACC}/reads_${i}.fastq.gz" "https://${u}"
+              out="work/${ACC}/reads_${i}.fastq.gz"
+              got=false
+              for dattempt in 1 2 3; do
+                if curl -sS --fail -L --retry 3 --retry-all-errors \
+                        --connect-timeout 20 --max-time 1200 \
+                        -o "$out" "https://${u}" \
+                   && [ -s "$out" ] && gzip -t "$out" 2>/dev/null; then
+                  got=true
+                  break
+                fi
+                echo "::warning::download failed or corrupt: ${u} (attempt ${dattempt}/3)"
+                rm -f "$out"
+                [ "$dattempt" -lt 3 ] && sleep 20
+              done
+              if [ "$got" != "true" ]; then ena_ok=false; break; fi
               i=$((i+1))
             done
             R1="work/${ACC}/reads_1.fastq.gz"
-            R2="work/${ACC}/reads_2.fastq.gz"
-            [ "$PAIRED" = "false" ] && R2=""
+            if [ "$PAIRED" = "true" ]; then
+              R2="work/${ACC}/reads_2.fastq.gz"
+              [ -s "$R2" ] || ena_ok=false
+            fi
+            [ -s "$R1" ] || ena_ok=false
+          fi
+          # --- 2b. SRA Toolkit fallback: no ENA record OR ENA download failed. ---
+          if [ "$ena_ok" != "true" ]; then
+            echo "ENA path unavailable for ${ACC} — falling back to SRA Toolkit"
+            dumped=false
+            for dattempt in 1 2; do
+              if ( cd "work/${ACC}" && fasterq-dump "$ACC" --threads 2 --progress ) \
+                 && ls "work/${ACC}/${ACC}"*.fastq >/dev/null 2>&1; then
+                dumped=true
+                break
+              fi
+              echo "::warning::fasterq-dump failed for ${ACC} (attempt ${dattempt}/2)"
+              rm -f "work/${ACC}/${ACC}"*.fastq
+              [ "$dattempt" -lt 2 ] && sleep 30
+            done
+            if [ "$dumped" != "true" ]; then
+              echo "::error::could not obtain reads for ${ACC} via ENA or SRA Toolkit"
+              exit 1
+            fi
+            ( cd "work/${ACC}" && ls ${ACC}*.fastq | head && gzip -1 ${ACC}*.fastq )
+            if [ -f "work/${ACC}/${ACC}_2.fastq.gz" ]; then
+              PAIRED=true
+              R1="work/${ACC}/${ACC}_1.fastq.gz"
+              R2="work/${ACC}/${ACC}_2.fastq.gz"
+            elif [ -f "work/${ACC}/${ACC}_1.fastq.gz" ]; then
+              PAIRED=false
+              R1="work/${ACC}/${ACC}_1.fastq.gz"
+              R2=""
+            else
+              PAIRED=false
+              R1="work/${ACC}/${ACC}.fastq.gz"
+              R2=""
+            fi
+            [ -s "$R1" ] || { echo "::error::no reads produced for ${ACC}"; exit 1; }
           fi
           # resolve to absolute paths for snakemake
           R1="$(cd "$(dirname "$R1")" && pwd)/$(basename "$R1")"
@@ -293,22 +361,49 @@ jobs:
           git config user.email "vibrion-sentinel-bot@users.noreply.github.com"
           git pull --rebase --autostash || true
           python3 - <<'EOF'
-          import json, os
+          import json, os, urllib.request
           matrix = json.loads(os.environ["MATRIX_JSON"])
+          run_id = os.environ["RUN_ID"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          # Only accessions whose matrix job concluded 'success' are recorded.
+          # Failed/cancelled ones stay unseen so the next watch retries them
+          # (previously every matrix accession was recorded, permanently
+          # skipping failures -- e.g. SRR22351615/616 on 2026-09-29).
+          ok = set()
+          url = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"
+          req = urllib.request.Request(url, headers={
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2022-11-28"})
+          with urllib.request.urlopen(req, timeout=60) as r:
+              payload = json.load(r)
+          for j in payload.get("jobs", []):
+              name = j.get("name", "")
+              # matrix job names look like "process (SRR22351616, haiti)"
+              if name.startswith("process (") and j.get("conclusion") == "success":
+                  ok.add(name.split("(", 1)[1].split(",", 1)[0].strip())
           seen = set()
           try:
               with open("state/seen_accessions.txt") as f:
                   seen = {l.strip() for l in f if l.strip() and not l.startswith("#")}
           except FileNotFoundError:
               pass
-          new = [i["accession"] for i in matrix["include"] if i["accession"] not in seen]
+          ordered = [i["accession"] for i in matrix["include"]]
+          new = [a for a in ordered if a in ok and a not in seen]
+          failed = [a for a in ordered if a not in ok]
           with open("state/seen_accessions.txt", "a") as f:
               for acc in new:
                   f.write(acc + "\n")
-          print(f"recorded {len(new)} accessions")
+          print(f"recorded {len(new)} succeeded accessions")
+          if failed:
+              print(f"::warning::not recording {len(failed)} unsuccessful accessions; "
+                    f"they will be retried on the next watch: {', '.join(failed)}")
           EOF
           git add state/seen_accessions.txt
           git diff --cached --quiet || git commit -m "sentinel: processed accessions $(date -u +%F)"
           git push
         env:
           MATRIX_JSON: ${{ needs.watch.outputs.matrix }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.run_id }}
