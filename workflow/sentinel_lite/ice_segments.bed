@@ -12,9 +12,9 @@
 #chrom	start	end	name	score	strand	source
 # cargo block 1: floR/strB/strA/sul2 (1-based 98146-102832)
 CP003069.1	98145	102832	SXT_cargo1	.	-	ann
-# backbone block 1: traI (Vch1786_I0103) + traD (Vch1786_I0104), 1-based 125439-129459
-CP003069.1	125438	129459	SXT_backbone1	.	+	ann:Vch1786_I0103/I0104
-# backbone block 2: traC (Vch1786_I0118), 1-based 138426-140826
-CP003069.1	138425	140826	SXT_backbone2	.	+	ann:Vch1786_I0118
+# backbone block 1: traI (Vch1786_I0103) + traD (Vch1786_I0104), 1-based 125440-129459
+CP003069.1	125439	129459	SXT_backbone1	.	+	ann:Vch1786_I0103/I0104
+# backbone block 2: traC (Vch1786_I0118), 1-based 138427-140826
+CP003069.1	138426	140826	SXT_backbone2	.	+	ann:Vch1786_I0118
 # cargo block 2: dfrA1 (1-based 168756-169230)
 CP003069.1	168755	169230	SXT_cargo2	.	-	ann

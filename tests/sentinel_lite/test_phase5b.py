@@ -148,7 +148,7 @@ class TestCallAlleles(unittest.TestCase):
             os.unlink(vcf)
 
     def test_hapR_scan_reports_variants(self):
-        # SNP inside the hapR span (1-based 3023607-3024215).
+        # SNP inside the hapR span (1-based 3023604-3024215).
         vcf = write_vcf_gz([(3024000, "A", "G")])
         try:
             res = report_lib.call_alleles(vcf, self.consensus, self.table)
