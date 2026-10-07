@@ -156,9 +156,13 @@ jobs:
           kraken2-build --build --db kraken2_serogroup --threads 2
 
           echo "▶ Packaging..."
+          # NOTE: bwa-mem2 2.x writes its FM-index as .bwt.2bit.64 (not .bwt)
+          # and writes no .sa file at all -- verified against bwa-mem2 v2.2.1
+          # source (FMI_search.cpp: CP_FILENAME_SUFFIX). The .0123 binary ref
+          # is packaged too; harmless and keeps the bundle self-contained.
           tar -czf ../sentinel-refs-v1.tar.gz \
-            2010EL-1786.fasta 2010EL-1786.fasta.bwt 2010EL-1786.fasta.pac \
-            2010EL-1786.fasta.ann 2010EL-1786.fasta.amb 2010EL-1786.fasta.sa \
+            2010EL-1786.fasta 2010EL-1786.fasta.bwt.2bit.64 2010EL-1786.fasta.pac \
+            2010EL-1786.fasta.ann 2010EL-1786.fasta.amb 2010EL-1786.fasta.0123 \
             Haiti_2022_Resurgence.fasta \
             mobile_refs \
             kraken2_haiti_custom kraken2_serogroup
