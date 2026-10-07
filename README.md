@@ -46,6 +46,17 @@ Each accession gets a fast, reference-based characterization:
 
 Output is a single `report.json` per sample: machine-readable, pushed to Supabase, with a per-run artifact on the workflow run. Samples that fail QC are reported as failed, not silently dropped. Haiti-tier raw reads go to `r2://raw/haiti/{ACC}/`; QC-pass consensus genomes to `r2://consensus/{ACC}.fasta.gz`.
 
+**Platforms and tiers (Phase 0 Nanopore branch).** The lite pipeline now runs on both Illumina and Oxford Nanopore reads, selected per-sample by `platform` in the run config (`illumina` default; `nanopore` requires `basecaller_model: fast|hac|sup` — the run refuses to start without it). Two tiers:
+
+| Tier | What it does | When to use it |
+|------|--------------|----------------|
+| **lite** (Tier A) | Mapping-based: NanoPlot QC → chopper filter (Q≥9, length≥1000) → minimap2 `map-ont` → the same Kraken2 / mapping / SNP / loci / consensus path as Illumina (bwa/fastp kept for Illumina) | Every sample, every platform — the fast first pass |
+| **assembly** (Tier B) | Flye (`--nano-hq`/`--nano-raw` by basecaller) → Medaka polish (basecaller-matched model) → assembly QC gate (3.8–4.4 Mb, ≤50 contigs, N50 ≥200 kb) → MLST (PubMLST *V. cholerae*) → vibecheck lineage → AMRFinderPlus (gene hits only) | Nanopore only, when lineage/AMR calls are needed |
+
+The assembly QC gate is load-bearing: a fragmented assembly invalidates the whole sample — lineage and AMR calls are suppressed, and the failure is recorded in the report rather than silently passed through. AMR output is **gene detected/not detected only, never a susceptibility prediction** (every report carries that disclaimer verbatim). Nanopore QC thresholds are tuned for the platform (site depth 15, mean depth 30, called 85%). Every `report.json` records `platform`, `basecaller_model`, tool+database versions, and carries pipeline version `0.2.0`.
+
+> **Decision record — Snakemake, not Nextflow (Phase 0).** The Nanopore branch extends the existing Snakemake lite pipeline; there is no migration to Nextflow in Phase 0. Rationale: the pipeline, its tests, and its CI are Snakemake-shaped; a rewrite would re-litigate every validated behavior for no Phase 0 gain. The Nextflow question reopens only if Phase 1 job orchestration forces it.
+
 ### 3. Historical cohorts (`cohorts/`)
 
 | Cohort | Runs | Span | Source |

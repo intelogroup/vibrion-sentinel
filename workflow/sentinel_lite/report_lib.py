@@ -176,3 +176,239 @@ def evaluate_qc(mean_depth, called_pct, species_purity_pct, thresholds):
             f"species_purity {species_purity_pct:.2f} < {thresholds['min_species_purity']}"
         )
     return ("fail" if reasons else "pass"), reasons
+
+
+# ---------------------------------------------------------------------------
+# Phase 0 (Nanopore branch): platform/tier config validation, QC defaults,
+# assembly-block parsing, tool-version collection.
+# ---------------------------------------------------------------------------
+
+VALID_PLATFORMS = ("illumina", "nanopore")
+VALID_TIERS = ("lite", "assembly")
+VALID_BASECALLERS = ("fast", "hac", "sup")
+
+PIPELINE_VERSION = "0.2.0"
+
+# Nanopore: homopolymer noise means stricter depth, looser per-base
+# expectations (ends of long reads drop out). Illumina values are the
+# pre-Phase-0 defaults, unchanged.
+PLATFORM_QC_DEFAULTS = {
+    "illumina": {"min_site_depth": 10, "qc_min_mean_depth": 20, "qc_min_called_pct": 90},
+    "nanopore": {"min_site_depth": 15, "qc_min_mean_depth": 30, "qc_min_called_pct": 85},
+}
+
+# Assembly QC gate (fail loudly): a fragmented assembly must never produce
+# lineage or AMR calls.
+ASM_MIN_LENGTH_BP = 3800000
+ASM_MAX_LENGTH_BP = 4400000
+ASM_MAX_CONTIGS = 50
+ASM_MIN_N50_BP = 200000
+
+# Load-bearing RUO disclaimer: must appear in every report carrying AMR calls
+# and in every downstream rendering of them.
+AMR_NOTE = "Gene detected/not detected only. Not a susceptibility prediction."
+
+# Medaka consensus models for R10.4.1 400bps chemistry, keyed by basecaller.
+# Confirm against `medaka tools list` for the installed Medaka version; a
+# mismatched model is a silent accuracy killer, which is why basecaller_model
+# is required (fail-closed) rather than guessed.
+MEDAKA_MODELS = {
+    "fast": "r1041_e82_400bps_fast_g615",
+    "hac": "r1041_e82_400bps_hac_g615",
+    "sup": "r1041_e82_400bps_sup_g615",
+}
+
+
+def validate_platform_config(config):
+    """(platform, basecaller_model, tier) from a config dict, or raise
+    ValueError. Fail-closed: platform=nanopore without basecaller_model
+    refuses to run, because Medaka models are basecaller-matched and a
+    wrong model silently degrades accuracy."""
+    platform = config.get("platform", "illumina")
+    if platform not in VALID_PLATFORMS:
+        raise ValueError(
+            f"unknown platform {platform!r}; expected one of {VALID_PLATFORMS}"
+        )
+    tier = config.get("tier", "lite")
+    if tier not in VALID_TIERS:
+        raise ValueError(f"unknown tier {tier!r}; expected one of {VALID_TIERS}")
+    basecaller = config.get("basecaller_model")
+    if platform == "nanopore":
+        if not basecaller:
+            raise ValueError(
+                "platform=nanopore requires basecaller_model "
+                f"(one of {VALID_BASECALLERS}); refusing to run"
+            )
+        if basecaller not in VALID_BASECALLERS:
+            raise ValueError(
+                f"unknown basecaller_model {basecaller!r}; "
+                f"expected one of {VALID_BASECALLERS}"
+            )
+    if tier == "assembly" and platform != "nanopore":
+        raise ValueError("tier=assembly is nanopore-only in Phase 0")
+    return platform, basecaller, tier
+
+
+def platform_qc_thresholds(config, platform):
+    """QC thresholds for a platform: platform defaults, with explicit
+    config values winning. Keys: min_site_depth, qc_min_mean_depth,
+    qc_min_called_pct."""
+    defaults = PLATFORM_QC_DEFAULTS[platform]
+    return {k: config.get(k, v) for k, v in defaults.items()}
+
+
+def medaka_model_for(basecaller):
+    """Medaka consensus model name for a basecaller; KeyError on unknown."""
+    return MEDAKA_MODELS[basecaller]
+
+
+def flye_preset_for(basecaller):
+    """Flye --nano-* preset: hac/sup reads are high-quality, fast are not."""
+    if basecaller in ("hac", "sup"):
+        return "--nano-hq"
+    return "--nano-raw"
+
+
+def parse_assembly_qc(path):
+    """{"length_bp", "contigs", "n50_bp"} from an assembly_qc.json file
+    written by the assembly_qc rule. Missing file -> zeros (gate fails)."""
+    import json as _json
+
+    try:
+        with open(path) as f:
+            d = _json.load(f)
+        return {
+            "length_bp": int(d.get("length_bp", 0)),
+            "contigs": int(d.get("contigs", 0)),
+            "n50_bp": int(d.get("n50_bp", 0)),
+        }
+    except (OSError, ValueError):
+        return {"length_bp": 0, "contigs": 0, "n50_bp": 0}
+
+
+def assembly_qc_gate(stats):
+    """(status, reasons) for the assembly QC gate. A failing assembly must
+    never produce lineage or AMR calls -- callers must check status first."""
+    reasons = []
+    n = stats["length_bp"]
+    if not (ASM_MIN_LENGTH_BP <= n <= ASM_MAX_LENGTH_BP):
+        reasons.append(
+            f"assembly length {n} outside {ASM_MIN_LENGTH_BP}-{ASM_MAX_LENGTH_BP}"
+        )
+    if stats["contigs"] > ASM_MAX_CONTIGS:
+        reasons.append(f"contig count {stats['contigs']} > {ASM_MAX_CONTIGS}")
+    if stats["n50_bp"] < ASM_MIN_N50_BP:
+        reasons.append(f"N50 {stats['n50_bp']} < {ASM_MIN_N50_BP}")
+    return ("fail" if reasons else "pass"), reasons
+
+
+def parse_mlst(path):
+    """ST string from tseemann/mlst TSV output (file, scheme, ST, alleles...).
+    '-' or missing -> None. Never raises on malformed input."""
+    try:
+        with open(path) as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) >= 3 and parts[2] not in ("-", ""):
+                    return parts[2]
+                return None
+    except OSError:
+        return None
+    return None
+
+
+def parse_vibecheck(path):
+    """Lineage string (e.g. 'T12') from vibecheck output. Tolerant: tries a
+    JSON {"lineage": ...} first, then falls back to the first T\\d+ token in
+    text. None when nothing is found. The exact vibecheck CLI/output format
+    must be confirmed against https://github.com/cholgen/vibecheck."""
+    import json as _json
+
+    try:
+        with open(path) as f:
+            text = f.read()
+    except OSError:
+        return None
+    try:
+        d = _json.loads(text)
+        lin = d.get("lineage")
+        if lin:
+            return str(lin)
+    except ValueError:
+        pass
+    m = re.search(r"\b(T\d{1,2})\b", text)
+    return m.group(1) if m else None
+
+
+def parse_amrfinder(path):
+    """Sorted, deduplicated AMR gene symbols from AMRFinderPlus TSV output
+    ('Gene symbol' column). Empty list on missing/malformed input. Gene
+    presence only -- never a susceptibility prediction."""
+    genes = set()
+    try:
+        with open(path) as f:
+            header = None
+            for line in f:
+                if not line.strip():
+                    continue
+                parts = line.rstrip("\n").split("\t")
+                if header is None:
+                    header = parts
+                    try:
+                        idx = header.index("Gene symbol")
+                    except ValueError:
+                        return []
+                    continue
+                if idx < len(parts) and parts[idx].strip():
+                    genes.add(parts[idx].strip())
+    except OSError:
+        return []
+    return sorted(genes)
+
+
+def build_assembly_block(stats, mlst_st, lineage, amr_genes, gate_status):
+    """The report.json 'assembly' block. lineage/amr_genes are None/[]
+    unless gate_status is 'pass' -- a failing assembly never yields calls."""
+    block = {
+        "length_bp": stats["length_bp"],
+        "contigs": stats["contigs"],
+        "n50_bp": stats["n50_bp"],
+        "qc_gate": gate_status,
+        "mlst_st": mlst_st if gate_status == "pass" else None,
+        "vibecheck_lineage": lineage if gate_status == "pass" else None,
+        "amr_genes": sorted(set(amr_genes)) if gate_status == "pass" else [],
+        "amr_note": AMR_NOTE,
+    }
+    return block
+
+
+def collect_tool_versions(specs, runner=None):
+    """{tool: version_string} for [(name, argv), ...]. runner defaults to
+    subprocess.run; inject a fake in tests. A tool that errors or is absent
+    records 'unknown' instead of raising -- version collection must never
+    fail a run."""
+    import subprocess as _sp
+
+    if runner is None:
+        def runner(argv):
+            return _sp.run(argv, capture_output=True, text=True, timeout=60)
+
+    versions = {}
+    for name, argv in specs:
+        try:
+            r = runner(argv)
+            out = (r.stdout or "") + (r.stderr or "")
+            first = out.strip().splitlines()[0] if out.strip() else ""
+            versions[name] = first[:200] if first else "unknown"
+        except Exception:
+            versions[name] = "unknown"
+    return versions
+
+
+def amrfinder_db_version(raw_version_output):
+    """Database version from `amrfinder --version` output, which prints both
+    software and database versions. 'unknown' when not found."""
+    m = re.search(r"[Dd]atabase version:?\s*(\S+)", raw_version_output or "")
+    return m.group(1) if m else "unknown"

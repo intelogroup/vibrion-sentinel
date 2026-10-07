@@ -1,8 +1,22 @@
 # Vibrion Sentinel — lite per-sample pipeline (GitHub Actions tier)
 #
-# Balanced-tier core: QC -> Haiti kraken2 classification -> Vibrio read
-# extraction -> BWA mapping vs 7PET reference -> variant calling ->
-# surveillance-loci coverage -> JSON report.
+# Phase 0 (Nanopore branch): two tiers, platform-dispatched at parse time.
+#
+#   Tier lite     — mapping-based QC -> Haiti kraken2 classification -> Vibrio
+#                   read extraction -> mapping vs 7PET reference -> variant
+#                   calling -> surveillance-loci coverage -> JSON report.
+#                   Works for Illumina (bwa mem) and Nanopore (minimap2 map-ont).
+#   Tier assembly — Nanopore only: Flye assembly -> Medaka polish -> assembly QC
+#                   gate -> MLST -> vibecheck lineage -> AMRFinderPlus -> report.
+#                   A failing assembly QC gate suppresses all lineage/AMR calls.
+#
+# Config (per accession, written by the GitHub workflow or future upload API):
+#   platform:         illumina | nanopore          (default: illumina)
+#   basecaller_model: fast | hac | sup             (REQUIRED for nanopore; fail-closed)
+#   tier:             lite | assembly              (default: lite; assembly is nanopore-only)
+#
+# Decision record: Snakemake is extended, not replaced, in Phase 0. A Nextflow
+# migration reopens only if Phase 1 job orchestration forces it.
 #
 # Runs inside the single `sentinel_lite` conda env (tools on PATH).
 # The GitHub workflow writes config.yaml per accession before invoking:
@@ -15,18 +29,28 @@ _sys.path.insert(0, workflow.basedir)
 import report_lib
 import vibrio_extract_lib
 import loci_coverage_lib
+import nano_qc_lib
 
 ACC = config["accession"]
 REFDIR = config["refdir"]
 OUTDIR = config["outdir"]
-PAIRED = config.get("paired", True)
 THREADS = config.get("threads", 2)
 
-# QC thresholds. Provisional defaults: no organism-specific published
-# standard was found for V. cholerae mapping QC; tune against known-good runs.
-MIN_SITE_DEPTH = config.get("min_site_depth", 10)        # per-position: below -> N in consensus, no variant call
-QC_MIN_MEAN_DEPTH = config.get("qc_min_mean_depth", 20)  # genome-wide mean depth
-QC_MIN_CALLED_PCT = config.get("qc_min_called_pct", 90)  # % of reference called (not masked)
+# Platform / tier dispatch. Fail-closed: nanopore without basecaller_model
+# refuses to run (Medaka models are basecaller-matched; a wrong model is a
+# silent accuracy killer). See report_lib.validate_platform_config.
+PLATFORM, BASECALLER_MODEL, TIER = report_lib.validate_platform_config(config)
+
+# Nanopore reads are single-end by construction.
+PAIRED = config.get("paired", True)
+if PLATFORM == "nanopore":
+    PAIRED = False
+
+# QC thresholds: platform defaults, explicit config values win.
+_QC = report_lib.platform_qc_thresholds(config, PLATFORM)
+MIN_SITE_DEPTH = _QC["min_site_depth"]        # per-position: below -> N in consensus, no variant call
+QC_MIN_MEAN_DEPTH = _QC["qc_min_mean_depth"]  # genome-wide mean depth
+QC_MIN_CALLED_PCT = _QC["qc_min_called_pct"]  # % of reference called (not masked)
 LOCUS_PRESENT_BREADTH = config.get("locus_present_breadth", 80)  # % of locus with >= 1 read
 LOCUS_ABSENT_BREADTH = config.get("locus_absent_breadth", 20)
 QC_MIN_SPECIES_PURITY = config.get("qc_min_species_purity", 90)  # % of kraken-processed reads classified as V. cholerae
@@ -42,7 +66,12 @@ rule all:
         f"{OUTDIR}/report.json",
 
 
+# --------------------------------------------------------------------------
+# Read QC (platform-dispatched)
+# --------------------------------------------------------------------------
+
 rule fastp_qc:
+    """Illumina read QC. Skipped entirely for platform=nanopore."""
     input:
         r1=config["reads_r1"],
         r2=config["reads_r2"] if PAIRED else [],
@@ -56,26 +85,79 @@ rule fastp_qc:
         """
         mkdir -p {OUTDIR}/01_qc
         if [ "{PAIRED}" = "True" ]; then
-            fastp -i {input.r1} -I {input.r2} \
-                -o {output.r1} -O {output.r2} \
-                -j {output.json} -h {output.html} \
-                -w {threads} --detect_adapter_for_pe \
+            fastp -i {input.r1} -I {input.r2} \\
+                -o {output.r1} -O {output.r2} \\
+                -j {output.json} -h {output.html} \\
+                -w {threads} --detect_adapter_for_pe \\
                 2> {OUTDIR}/01_qc/fastp.log
         else
-            fastp -i {input.r1} \
-                -o {output.r1} \
-                -j {output.json} -h {output.html} \
-                -w {threads} \
+            fastp -i {input.r1} \\
+                -o {output.r1} \\
+                -j {output.json} -h {output.html} \\
+                -w {threads} \\
                 2> {OUTDIR}/01_qc/fastp.log
             touch {output.r2}
         fi
         """
 
 
+rule nanoplot_qc:
+    """Nanopore read QC stats (NanoPlot). Skipped for platform=illumina."""
+    input:
+        reads=config["reads_r1"],
+    output:
+        stats=f"{OUTDIR}/01_qc/nanoplot/NanoStats.txt",
+    threads: THREADS
+    shell:
+        """
+        mkdir -p {OUTDIR}/01_qc/nanoplot
+        NanoPlot --fastq {input.reads} -o {OUTDIR}/01_qc/nanoplot \\
+            --threads {threads} --no_static 2> {OUTDIR}/01_qc/nanoplot.log
+        """
+
+
+rule nanofilt_filter:
+    """Nanopore read filtering with chopper (the maintained NanoFilt
+    successor): Q>=9, length>=1000. Writes a fastp-shaped summary JSON via
+    nano_qc_lib so the report rule stays platform-agnostic."""
+    input:
+        reads=config["reads_r1"],
+        stats=rules.nanoplot_qc.output.stats,
+    output:
+        r1=f"{OUTDIR}/01_qc/cleaned.fastq.gz",
+        r2=f"{OUTDIR}/01_qc/cleaned_2.fastq.gz",  # empty placeholder (single-end)
+        summary=f"{OUTDIR}/01_qc/qc_summary.json",
+    threads: THREADS
+    run:
+        import subprocess
+
+        subprocess.run(
+            f"chopper -q 9 -l 1000 -t {THREADS} -i {input.reads} "
+            f"2> {OUTDIR}/01_qc/chopper.log | pigz -p {THREADS} > {output.r1}",
+            shell=True,
+            check=True,
+        )
+        # single-end placeholder, mirroring extract_vibrio's convention
+        open(output.r2, "wb").close()
+        nano_qc_lib.write_qc_summary(input.stats, output.r1, output.summary)
+
+
+# Platform dispatch for everything downstream of read QC. Resolved at parse
+# time (PLATFORM is fixed per config); only the selected branch enters the DAG.
+if PLATFORM == "nanopore":
+    _QC_R1 = rules.nanofilt_filter.output.r1
+    _QC_R2 = rules.nanofilt_filter.output.r2
+    _QC_SUMMARY = rules.nanofilt_filter.output.summary
+else:
+    _QC_R1 = rules.fastp_qc.output.r1
+    _QC_R2 = rules.fastp_qc.output.r2
+    _QC_SUMMARY = rules.fastp_qc.output.json
+
+
 rule kraken2_classify:
     input:
-        r1=rules.fastp_qc.output.r1,
-        r2=rules.fastp_qc.output.r2,
+        r1=_QC_R1,
+        r2=_QC_R2,
     output:
         out=f"{OUTDIR}/02_kraken/kraken.out",
         report=f"{OUTDIR}/02_kraken/kraken.report",
@@ -86,12 +168,12 @@ rule kraken2_classify:
         """
         mkdir -p {OUTDIR}/02_kraken
         if [ "{PAIRED}" = "True" ]; then
-            kraken2 --db {KRAKEN_DB} --threads {threads} --paired \
-                --output {output.out} --report {output.report} \
+            kraken2 --db {KRAKEN_DB} --threads {threads} --paired \\
+                --output {output.out} --report {output.report} \\
                 {input.r1} {input.r2} 2> {OUTDIR}/02_kraken/kraken.log
-        else
-            kraken2 --db {KRAKEN_DB} --threads {threads} \
-                --output {output.out} --report {output.report} \
+        else:
+            kraken2 --db {KRAKEN_DB} --threads {threads} \\
+                --output {output.out} --report {output.report} \\
                 {input.r1} 2> {OUTDIR}/02_kraken/kraken.log
         fi
         """
@@ -100,14 +182,14 @@ rule kraken2_classify:
 rule extract_vibrio:
     """Keep reads classified as V. cholerae (taxid 666) or unclassified.
 
-    Kraken is the coarse filter; BWA mapping to the cholerae reference
+    Kraken is the coarse filter; mapping to the cholerae reference
     downstream is the confirmatory step, so unclassified reads are kept
     to rescue divergent strains.
     """
     input:
         kraken=rules.kraken2_classify.output.out,
-        r1=rules.fastp_qc.output.r1,
-        r2=rules.fastp_qc.output.r2,
+        r1=_QC_R1,
+        r2=_QC_R2,
     output:
         r1=f"{OUTDIR}/03_vibrio/vibrio_1.fastq.gz",
         r2=f"{OUTDIR}/03_vibrio/vibrio_2.fastq.gz",
@@ -136,6 +218,7 @@ rule extract_vibrio:
 
 
 rule bwa_map:
+    """Illumina mapping vs 7PET reference. Skipped for platform=nanopore."""
     input:
         r1=rules.extract_vibrio.output.r1,
         r2=rules.extract_vibrio.output.r2,
@@ -146,19 +229,41 @@ rule bwa_map:
         """
         mkdir -p {OUTDIR}/04_map
         if [ "{PAIRED}" = "True" ]; then
-            bwa mem -t {threads} {REF} {input.r1} {input.r2} 2> {OUTDIR}/04_map/bwa.log \
+            bwa mem -t {threads} {REF} {input.r1} {input.r2} 2> {OUTDIR}/04_map/bwa.log \\
                 | samtools sort -@ {threads} -o {output.bam}
-        else
-            bwa mem -t {threads} {REF} {input.r1} 2> {OUTDIR}/04_map/bwa.log \
+        else:
+            bwa mem -t {threads} {REF} {input.r1} 2> {OUTDIR}/04_map/bwa.log \\
                 | samtools sort -@ {threads} -o {output.bam}
         fi
         samtools index {output.bam}
         """
 
 
+rule minimap2_map:
+    """Nanopore mapping vs 7PET reference (minimap2 map-ont).
+    Skipped for platform=illumina."""
+    input:
+        r1=rules.extract_vibrio.output.r1,
+    output:
+        bam=f"{OUTDIR}/04_map_ont/mapped.bam",
+    threads: THREADS
+    shell:
+        """
+        mkdir -p {OUTDIR}/04_map_ont
+        minimap2 -ax map-ont -t {threads} {REF} {input.r1} \\
+            2> {OUTDIR}/04_map_ont/minimap2.log \\
+            | samtools sort -@ {threads} -o {output.bam}
+        samtools index {output.bam}
+        """
+
+
+# BAM-level dispatch: everything downstream is platform-agnostic ("BAM is BAM").
+_MAP_BAM = rules.minimap2_map.output.bam if PLATFORM == "nanopore" else rules.bwa_map.output.bam
+
+
 rule coverage_stats:
     input:
-        bam=rules.bwa_map.output.bam,
+        bam=_MAP_BAM,
     output:
         cov=f"{OUTDIR}/04_map/coverage.txt",
         flag=f"{OUTDIR}/04_map/flagstat.txt",
@@ -171,7 +276,7 @@ rule coverage_stats:
 
 rule loci_coverage:
     input:
-        bam=rules.bwa_map.output.bam,
+        bam=_MAP_BAM,
     output:
         txt=f"{OUTDIR}/05_loci/loci_coverage.txt",
     run:
@@ -201,9 +306,14 @@ rule loci_coverage:
 
 rule call_variants:
     """Haploid calling (V. cholerae is haploid; bcftools defaults to diploid),
-    then keep only sites with QUAL >= 30 and depth >= MIN_SITE_DEPTH."""
+    then keep only sites with QUAL >= 30 and depth >= MIN_SITE_DEPTH
+    (15 for Nanopore: homopolymer noise demands stricter depth).
+
+    Note: indel calls from Nanopore reads are unreliable; the SNV-only
+    consensus rule below excludes indels by design, which is exactly right
+    here. Indels are still kept in variants.vcf.gz for inspection."""
     input:
-        bam=rules.bwa_map.output.bam,
+        bam=_MAP_BAM,
     output:
         raw=f"{OUTDIR}/06_variants/variants.raw.vcf.gz",
         vcf=f"{OUTDIR}/06_variants/variants.vcf.gz",
@@ -214,11 +324,11 @@ rule call_variants:
     shell:
         """
         mkdir -p {OUTDIR}/06_variants
-        bcftools mpileup -f {REF} --threads {threads} -q 20 -Q 20 \
-            {input.bam} 2> {log} | \
-            bcftools call --ploidy 1 -mv -Oz --threads {threads} \
+        bcftools mpileup -f {REF} --threads {threads} -q 20 -Q 20 \\
+            {input.bam} 2> {log} | \\
+            bcftools call --ploidy 1 -mv -Oz --threads {threads} \\
             -o {output.raw} 2>> {log}
-        bcftools filter -i 'QUAL>=30 && INFO/DP>={MIN_SITE_DEPTH}' \
+        bcftools filter -i 'QUAL>=30 && INFO/DP>={MIN_SITE_DEPTH}' \\
             -Oz -o {output.vcf} {output.raw} 2>> {log}
         bcftools index -f {output.vcf} 2>> {log}
         bcftools view -H -v snps {output.vcf} | wc -l > {output.snp_count}
@@ -232,13 +342,13 @@ rule depth_mask:
     scripts/depth_mask.awk (tested independently; see
     tests/sentinel_lite/test_depth_mask_awk.py)."""
     input:
-        bam=rules.bwa_map.output.bam,
+        bam=_MAP_BAM,
     output:
         bed=f"{OUTDIR}/06_variants/low_depth_mask.bed",
     shell:
         """
-        samtools depth -aa -q 20 -Q 20 {input.bam} | \
-            awk -v m={MIN_SITE_DEPTH} -f {workflow.basedir}/scripts/depth_mask.awk \
+        samtools depth -aa -q 20 -Q 20 {input.bam} | \\
+            awk -v m={MIN_SITE_DEPTH} -f {workflow.basedir}/scripts/depth_mask.awk \\
             > {output.bed}
         """
 
@@ -265,107 +375,342 @@ rule consensus:
         """
         bcftools view -v snps -Oz -o {output.snv} {input.vcf} 2> {log}
         bcftools index -f {output.snv} 2>> {log}
-        bcftools consensus -f {REF} -m {input.mask} {output.snv} \
+        bcftools consensus -f {REF} -m {input.mask} {output.snv} \\
             > {output.fa} 2>> {log}
         """
 
 
-rule report:
-    input:
-        fastp_json=rules.fastp_qc.output.json,
-        kraken_report=rules.kraken2_classify.output.report,
-        extract_stats=rules.extract_vibrio.output.stats,
-        coverage=rules.coverage_stats.output.cov,
-        flagstat=rules.coverage_stats.output.flag,
-        loci=rules.loci_coverage.output.txt,
-        loci_bed=LOCI_BED,
-        snp_count=rules.call_variants.output.snp_count,
-        consensus=rules.consensus.output.fa,
+# --------------------------------------------------------------------------
+# Tier B: assembly path (Nanopore only). Defined only when tier=assembly.
+# --------------------------------------------------------------------------
+if TIER == "assembly":
+    _FLYE_PRESET = report_lib.flye_preset_for(BASECALLER_MODEL)
+    # Medaka model baked into the image at build time (see Dockerfile);
+    # must match basecaller_model -- see MEDAKA_MODELS in report_lib.
+    _MEDAKA_MODEL = report_lib.medaka_model_for(BASECALLER_MODEL)
+
+    rule flye_assemble:
+        """De novo assembly of Nanopore reads (Flye). Preset follows the
+        basecaller: hac/sup reads are high-quality (--nano-hq)."""
+        input:
+            reads=rules.nanofilt_filter.output.r1,
+        output:
+            asm=f"{OUTDIR}/07_assembly/assembly.fasta",
+        threads: THREADS
+        shell:
+            """
+            mkdir -p {OUTDIR}/07_assembly/flye
+            flye {_FLYE_PRESET} {input.reads} --genome-size 4m \\
+                --threads {threads} --out-dir {OUTDIR}/07_assembly/flye \\
+                2> {OUTDIR}/07_assembly/flye.log
+            cp {OUTDIR}/07_assembly/flye/assembly.fasta {output.asm}
+            """
+
+    rule medaka_polish:
+        """Polish with the basecaller-matched Medaka model."""
+        input:
+            asm=rules.flye_assemble.output.asm,
+            reads=rules.nanofilt_filter.output.r1,
+        output:
+            polished=f"{OUTDIR}/07_assembly/polished.fasta",
+        threads: THREADS
+        shell:
+            """
+            mkdir -p {OUTDIR}/07_assembly/medaka
+            medaka_consensus -i {input.reads} -d {input.asm} \\
+                -o {OUTDIR}/07_assembly/medaka -m {_MEDAKA_MODEL} -t {threads} \\
+                2> {OUTDIR}/07_assembly/medaka.log
+            cp {OUTDIR}/07_assembly/medaka/consensus.fasta {output.polished}
+            """
+
+    rule assembly_qc:
+        """Assembly stats for the QC gate (length / contigs / N50).
+        The gate itself is evaluated in the report rule; a failing gate
+        suppresses all lineage and AMR calls."""
+        input:
+            asm=rules.medaka_polish.output.polished,
+        output:
+            json=f"{OUTDIR}/07_assembly/assembly_qc.json",
+        run:
+            import json as _json
+
+            lens = []
+            with open(input.asm) as f:
+                cur = 0
+                for line in f:
+                    if line.startswith(">"):
+                        if cur:
+                            lens.append(cur)
+                        cur = 0
+                    else:
+                        cur += len(line.strip())
+                if cur:
+                    lens.append(cur)
+            total = sum(lens)
+            lens.sort(reverse=True)
+            cum, n50 = 0, 0
+            for L in lens:
+                cum += L
+                if cum >= total / 2:
+                    n50 = L
+                    break
+            with open(output.json, "w") as f:
+                _json.dump(
+                    {"length_bp": total, "contigs": len(lens), "n50_bp": n50},
+                    f,
+                    indent=2,
+                )
+
+    rule mlst_type:
+        """MLST sequence type, PubMLST V. cholerae scheme. '-' / missing -> None."""
+        input:
+            asm=rules.medaka_polish.output.polished,
+        output:
+            tsv=f"{OUTDIR}/07_assembly/mlst.tsv",
+        shell:
+            """
+            mlst --scheme vcholerae {input.asm} > {output.tsv} 2> {OUTDIR}/07_assembly/mlst.log || true
+            [ -s {output.tsv} ] || printf "%s\\t-\\t-\\n" "{input.asm}" > {output.tsv}
+            """
+
+    rule vibecheck_lineage:
+        """O1 lineage placement (T1-T17) via cholgen/vibecheck.
+        FIXME: confirm exact CLI flags against https://github.com/cholgen/vibecheck
+        before relying on this rule; the parser (report_lib.parse_vibecheck)
+        tolerates JSON {"lineage": ...} or a T<digits> token in text."""
+        input:
+            asm=rules.medaka_polish.output.polished,
+        output:
+            txt=f"{OUTDIR}/07_assembly/vibecheck.txt",
+        shell:
+            """
+            vibecheck --input {input.asm} --output {output.txt} \\
+                2> {OUTDIR}/07_assembly/vibecheck.log || \\
+                echo "vibecheck: no lineage assigned" > {output.txt}
+            """
+
+    rule amr_scan:
+        """AMRFinderPlus gene detection. Gene presence ONLY -- the report
+        carries the gene-detected/not-detected disclaimer, never a
+        susceptibility prediction (RUO posture)."""
+        input:
+            asm=rules.medaka_polish.output.polished,
+        output:
+            tsv=f"{OUTDIR}/07_assembly/amrfinder.tsv",
+            version=f"{OUTDIR}/07_assembly/amrfinder_version.txt",
+        threads: THREADS
+        shell:
+            """
+            amrfinder -n {input.asm} --organism "Vibrio cholerae" \\
+                --threads {threads} -o {output.tsv} \\
+                2> {OUTDIR}/07_assembly/amrfinder.log || \\
+                printf "Gene symbol\\n" > {output.tsv}
+            amrfinder --version > {output.version} 2>&1 || \\
+                echo "unknown" > {output.version}
+            """
+
+
+rule tool_versions:
+    """Best-effort tool+DB versions for the per-sample manifest. A tool that
+    is absent or errors records 'unknown' -- version collection never fails
+    a run. Medaka model comes from config (baked into the image); the
+    AMRFinderPlus DB version is parsed from `amrfinder --version` output."""
     output:
-        json=f"{OUTDIR}/report.json",
+        json=f"{OUTDIR}/tool_versions.json",
     run:
-        import json as _json, os
+        import json as _json
 
-        def load_json(p):
-            with open(p) as f:
-                return _json.load(f)
+        specs = [
+            ("kraken2", ["kraken2", "--version"]),
+            ("samtools", ["samtools", "--version"]),
+            ("bcftools", ["bcftools", "--version"]),
+        ]
+        if PLATFORM == "illumina":
+            specs += [("fastp", ["fastp", "--version"]), ("bwa", ["bwa"])]
+        else:
+            specs += [
+                ("nanoplot", ["NanoPlot", "--version"]),
+                ("chopper", ["chopper", "--version"]),
+                ("minimap2", ["minimap2", "--version"]),
+            ]
+        if TIER == "assembly":
+            specs += [
+                ("flye", ["flye", "--version"]),
+                ("medaka", ["medaka", "--version"]),
+                ("mlst", ["mlst", "--version"]),
+                ("amrfinder", ["amrfinder", "--version"]),
+            ]
+        versions = report_lib.collect_tool_versions(specs)
+        versions["kraken_db"] = "kraken2_haiti_custom"
+        if PLATFORM == "nanopore":
+            versions["medaka_model"] = report_lib.medaka_model_for(BASECALLER_MODEL)
+        with open(output.json, "w") as f:
+            _json.dump(versions, f, indent=2)
 
-        fp = load_json(input.fastp_json)
-        before = fp["summary"]["before_filtering"]["total_reads"]
-        after = fp["summary"]["after_filtering"]["total_reads"]
 
-        cholerae_reads, _unclass, _root, total_kraken = \
-            report_lib.parse_kraken_report(input.kraken_report)
-        v_cholerae_fraction, species_purity_pct = \
-            report_lib.species_purity(cholerae_reads, total_kraken)
+def _run_report(input, output):
+    """Shared rep body; assembly inputs are only present when
+    tier=assembly (the rule variants below select at parse time)."""
+    import json as _json, os
 
-        ex = load_json(input.extract_stats)
+    def load_json(p):
+        with open(p) as f:
+            return _json.load(f)
 
-        mean_depth, breadth = report_lib.genome_wide_coverage(input.coverage)
-        with open(input.flagstat) as _f:
-            mapped = report_lib.parse_flagstat_mapped(_f.read())
+    fp = load_json(input.summary)
+    before = fp["summary"]["before_filtering"]["total_reads"]
+    after = fp["summary"]["after_filtering"]["total_reads"]
 
-        bed_labels = report_lib.parse_loci_bed(input.loci_bed)
-        loci_calls = report_lib.call_loci(
-            input.loci, bed_labels, LOCUS_PRESENT_BREADTH, LOCUS_ABSENT_BREADTH)
+    cholerae_reads, _unclass, _root, total_kraken = \
+        report_lib.parse_kraken_report(input.kraken_report)
+    v_cholerae_fraction, species_purity_pct = \
+        report_lib.species_purity(cholerae_reads, total_kraken)
 
-        snps = report_lib.read_snp_count(input.snp_count)
-        cons_len, cons_n, called_pct = report_lib.consensus_stats(input.consensus)
+    ex = load_json(input.extract_stats)
 
-        # QC gate: a failing run still gets a report (for inspection), but its
-        # variants/consensus/loci calls must not be treated as results.
-        qc_status, qc_reasons = report_lib.evaluate_qc(
-            mean_depth, called_pct, species_purity_pct,
-            {
+    mean_depth, breadth = report_lib.genome_wide_coverage(input.coverage)
+    with open(input.flagstat) as _f:
+        mapped = report_lib.parse_flagstat_mapped(_f.read())
+
+    bed_labels = report_lib.parse_loci_bed(input.loci_bed)
+    loci_calls = report_lib.call_loci(
+        input.loci, bed_labels, LOCUS_PRESENT_BREADTH, LOCUS_ABSENT_BREADTH)
+
+    snps = report_lib.read_snp_count(input.snp_count)
+    cons_len, cons_n, called_pct = report_lib.consensus_stats(input.consensus)
+
+    # QC gate: a failing run still gets a rep (for inspection), but its
+    # variants/consensus/loci calls must not be treated as results.
+    qc_status, qc_reasons = report_lib.evaluate_qc(
+        mean_depth, called_pct, species_purity_pct,
+        {
+            "min_mean_depth": QC_MIN_MEAN_DEPTH,
+            "min_called_pct": QC_MIN_CALLED_PCT,
+            "min_species_purity": QC_MIN_SPECIES_PURITY,
+        },
+    )
+
+    rep = {
+        "pipeline": "vibrion-sentinel-lite",
+        "version": report_lib.PIPELINE_VERSION,
+        "accession": ACC,
+        "platform": PLATFORM,
+        "basecaller_model": BASECALLER_MODEL,
+        "tier": TIER,
+        "reference": "2010EL-1786 (7PET, CP003069.1/CP003070.1)",
+        "reads": {
+            "raw": before,
+            "qc_passed": after,
+            "vibrio_kept": ex["kept_for_mapping"],
+        },
+        "classification": {
+            "kraken_db": "kraken2_haiti_custom",
+            "v_cholerae_reads": cholerae_reads,
+            "v_cholerae_fraction": round(v_cholerae_fraction, 4),
+        },
+        "mapping": {
+            "mapped_reads": mapped,
+            "mean_depth": round(mean_depth, 2),
+            "breadth_pct": round(breadth, 2),
+        },
+        "variants": {"snps_vs_7pet": snps},
+        "surveillance_loci": loci_calls,
+        "consensus_length": cons_len,
+        "consensus_called_pct": round(called_pct, 2),
+        "tool_versions": load_json(input.versions),
+        "qc": {
+            "status": qc_status,
+            "reasons": qc_reasons,
+            "thresholds": {
+                "locus_present_breadth": LOCUS_PRESENT_BREADTH,
+                "locus_absent_breadth": LOCUS_ABSENT_BREADTH,
+                "min_site_depth": MIN_SITE_DEPTH,
                 "min_mean_depth": QC_MIN_MEAN_DEPTH,
                 "min_called_pct": QC_MIN_CALLED_PCT,
                 "min_species_purity": QC_MIN_SPECIES_PURITY,
             },
+        },
+        "notes": "Lite tier: mapping-based, no de novo assembly. "
+                 "Consensus positions below min_site_depth are N. "
+                 "If qc.status is 'fail', variants, consensus and loci "
+                 "calls are not interpretable. Loci BED is provisional "
+                 "and does not yet support serogroup/biotype calls.",
+    }
+
+    if TIER == "assembly":
+        asm_stats = report_lib.parse_assembly_qc(input.assembly_qc)
+        gate_status, gate_reasons = report_lib.assembly_qc_gate(asm_stats)
+        rep["assembly"] = report_lib.build_assembly_block(
+            asm_stats,
+            report_lib.parse_mlst(input.mlst),
+            report_lib.parse_vibecheck(input.vibecheck),
+            report_lib.parse_amrfinder(input.amr),
+            gate_status,
+        )
+        with open(input.amr_version) as _f:
+            rep["assembly"]["amrfinder_db_version"] = \
+                report_lib.amrfinder_db_version(_f.read())
+        if gate_status == "fail":
+            # A fragmented assembly invalidates the whole sample: lineage
+            # and AMR calls are already suppressed in the assembly block.
+            qc_status = "fail"
+            qc_reasons = qc_reasons + [
+                f"assembly_qc: {r}" for r in gate_reasons
+            ]
+            rep["qc"]["status"] = qc_status
+            rep["qc"]["reasons"] = qc_reasons
+        rep["notes"] += (
+            " Assembly tier: Flye + Medaka (basecaller-matched model); "
+            "MLST/vibecheck/AMRFinderPlus calls require a passing assembly "
+            "QC gate. AMR output is gene detected/not detected only -- "
+            "not a susceptibility prediction."
         )
 
-        report = {
-            "pipeline": "vibrion-sentinel-lite",
-            "version": "0.1.0",
-            "accession": ACC,
-            "reference": "2010EL-1786 (7PET, CP003069.1/CP003070.1)",
-            "reads": {
-                "raw": before,
-                "qc_passed": after,
-                "vibrio_kept": ex["kept_for_mapping"],
-            },
-            "classification": {
-                "kraken_db": "kraken2_haiti_custom",
-                "v_cholerae_reads": cholerae_reads,
-                "v_cholerae_fraction": round(v_cholerae_fraction, 4),
-            },
-            "mapping": {
-                "mapped_reads": mapped,
-                "mean_depth": round(mean_depth, 2),
-                "breadth_pct": round(breadth, 2),
-            },
-            "variants": {"snps_vs_7pet": snps},
-            "surveillance_loci": loci_calls,
-            "consensus_length": cons_len,
-            "consensus_called_pct": round(called_pct, 2),
-            "qc": {
-                "status": qc_status,
-                "reasons": qc_reasons,
-                "thresholds": {
-                    "locus_present_breadth": LOCUS_PRESENT_BREADTH,
-                    "locus_absent_breadth": LOCUS_ABSENT_BREADTH,
-                    "min_site_depth": MIN_SITE_DEPTH,
-                    "min_mean_depth": QC_MIN_MEAN_DEPTH,
-                    "min_called_pct": QC_MIN_CALLED_PCT,
-                    "min_species_purity": QC_MIN_SPECIES_PURITY,
-                },
-            },
-            "notes": "Lite tier: mapping-based, no de novo assembly. "
-                     "Consensus positions below min_site_depth are N. "
-                     "If qc.status is 'fail', variants, consensus and loci "
-                     "calls are not interpretable. Loci BED is provisional "
-                     "and does not yet support serogroup/biotype calls.",
-        }
-        os.makedirs(OUTDIR, exist_ok=True)
-        with open(output.json, "w") as f:
-            _json.dump(report, f, indent=2)
-        print(_json.dumps(report, indent=2)[:2000])
+    os.makedirs(OUTDIR, exist_ok=True)
+    with open(output.json, "w") as f:
+        _json.dump(rep, f, indent=2)
+    print(_json.dumps(rep, indent=2)[:2000])
+
+
+# Report rule variants: assembly inputs exist only when tier=assembly.
+# (Snakemake 9 no longer accepts unpack() on a plain dict here, so the
+#  variants are selected at parse time instead.)
+if TIER == "assembly":
+    rule report:
+        input:
+            summary=_QC_SUMMARY,
+            kraken_report=rules.kraken2_classify.output.report,
+            extract_stats=rules.extract_vibrio.output.stats,
+            coverage=rules.coverage_stats.output.cov,
+            flagstat=rules.coverage_stats.output.flag,
+            loci=rules.loci_coverage.output.txt,
+            loci_bed=LOCI_BED,
+            snp_count=rules.call_variants.output.snp_count,
+            consensus=rules.consensus.output.fa,
+            versions=rules.tool_versions.output.json,
+            assembly_qc=rules.assembly_qc.output.json,
+            mlst=rules.mlst_type.output.tsv,
+            vibecheck=rules.vibecheck_lineage.output.txt,
+            amr=rules.amr_scan.output.tsv,
+            amr_version=rules.amr_scan.output.version,
+        output:
+            json=f"{OUTDIR}/report.json",
+        run:
+            _run_report(input, output)
+else:
+    rule report:
+        input:
+            summary=_QC_SUMMARY,
+            kraken_report=rules.kraken2_classify.output.report,
+            extract_stats=rules.extract_vibrio.output.stats,
+            coverage=rules.coverage_stats.output.cov,
+            flagstat=rules.coverage_stats.output.flag,
+            loci=rules.loci_coverage.output.txt,
+            loci_bed=LOCI_BED,
+            snp_count=rules.call_variants.output.snp_count,
+            consensus=rules.consensus.output.fa,
+            versions=rules.tool_versions.output.json,
+        output:
+            json=f"{OUTDIR}/report.json",
+        run:
+            _run_report(input, output)

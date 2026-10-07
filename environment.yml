@@ -24,6 +24,16 @@ dependencies:
   - seqkit>=2.5
   - kraken2>=2.1
 
+  # Phase 0: Nanopore branch (pinned; "latest" is not a version).
+  # Medaka models + AMRFinderPlus DB are baked into the Docker image;
+  # see the Dockerfile DB stage.
+  - nanoplot=1.46.1
+  - chopper=0.8.0  # maintained NanoFilt successor
+  - flye=2.9.5
+  - medaka=2.0.1
+  - mlst=2.23.0  # PubMLST V. cholerae scheme
+  - amrfinderplus=3.12.8
+
   # Data processing
   - pandas>=2.0
   - numpy>=1.24
@@ -48,3 +58,6 @@ dependencies:
       - transformers>=4.35.0
       - torch>=2.0.0
       - accelerate>=0.24.0
+      # vibecheck (cholgen/vibecheck) is not on bioconda; pin the exact commit.
+      # Observed 2026-09-23; re-pin deliberately, never float.
+      - git+https://github.com/cholgen/vibecheck.git@20f9cd49718328f571abeabc44d09e393a11136e

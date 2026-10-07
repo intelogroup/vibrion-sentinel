@@ -13,3 +13,16 @@ dependencies:
   - seqkit>=2.5
   - sra-tools>=3.0  # fallback downloader when ENA has no FTP copy
   - pigz>=2.8
+  # --- Phase 0: Nanopore branch (pinned; "latest" is not a version) ---
+  - nanoplot=1.46.1
+  - chopper=0.8.0  # maintained NanoFilt successor; Q>=9, length>=1000
+  - minimap2=2.28
+  - flye=2.9.5
+  - medaka=2.0.1  # models baked into the Docker image; see Dockerfile
+  - mlst=2.23.0  # PubMLST V. cholerae scheme
+  - amrfinderplus=3.12.8  # DB baked into the Docker image; version recorded
+  - pip>=23.0
+  - pip:
+      # vibecheck (cholgen/vibecheck) is not on bioconda; pin the exact commit.
+      # Observed 2026-09-23; re-pin deliberately, never float.
+      - git+https://github.com/cholgen/vibecheck.git@20f9cd49718328f571abeabc44d09e393a11136e

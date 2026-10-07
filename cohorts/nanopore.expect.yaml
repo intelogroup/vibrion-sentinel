@@ -1,0 +1,59 @@
+# Expectations for the Nanopore validation set (Phase 0).
+#
+# PLACEHOLDER -- NOT YET A GATE. This file encodes the structure the real
+# validation set will take; fill `accessions` with >=3 real Nanopore
+# V. cholerae accessions (start: SRR27991387_subset per the Phase 0 spec)
+# and the published per-isolate findings, then wire it into CI.
+# Until then, CI must NOT gate on this file.
+#
+# Same discipline as cohorts/backtest-2022.expect.yaml: thresholds encode
+# "the published description holds", not exact numeric equality with a
+# different method. A failure here is a finding about the pipeline and must
+# be reported as such, not silently retuned until it passes.
+#
+# Per-call-type validation bars (sentinel-liability-guardrails.md):
+#   species ID >=98% concordance, lineage >=95% concordance,
+#   AMR reported as gene detected/not detected only -- never
+#   resistant/susceptible.
+
+cohort: nanopore-validation
+manifest: null  # TODO: cohorts/nanopore-validation.tsv (>=3 accessions)
+
+# TODO: fill with real accessions, e.g.
+# accessions:
+#   - SRR27991387  # published ST / lineage / AMR profile on record
+
+platform: nanopore
+tiers:
+  - lite      # Tier A: mapping path (NanoPlot -> chopper -> minimap2)
+  - assembly  # Tier B: Flye -> Medaka -> MLST/vibecheck/AMRFinderPlus
+
+qc:
+  # Nanopore-tuned thresholds (report_lib.platform_qc_thresholds):
+  # min_site_depth 15, qc_min_mean_depth 30, qc_min_called_pct 85.
+  min_pass_rate: 0.80
+
+tier_a:
+  # Species purity >=98% on known V. cholerae (guardrail bar).
+  min_species_purity: 98.0
+  # SNP distance vs 2010EL-1786 within the expected range for each
+  # sample's known lineage; loci calls concordant with the Illumina
+  # path on the same isolate where paired data exists.
+  # TODO: per-accession expected SNP ranges + loci concordance checks.
+
+tier_b:
+  # Assembly QC gate must pass for every validation isolate
+  # (length 3.8-4.4 Mb, <=50 contigs, N50 >= 200 kb).
+  require_gate_pass: true
+  # MLST ST must match the published ST per isolate (TODO: map).
+  # vibecheck lineage must match the published lineage (>=95% concordance).
+  # AMRFinderPlus hits concordant with the published resistance gene
+  # profile -- gene-level only, never a susceptibility prediction.
+
+notes: >
+  PLACEHOLDER. Do not gate CI on this file until `accessions` and the
+  per-isolate published findings are filled in from real validation runs.
+  When filled: Tier A + Tier B run on every push to the pipeline
+  (Flye+Medaka on a 4 Mb genome fits Actions runners); if Medaka wall
+  time exceeds 20 min, split Tier B to a workflow_dispatch-only job.
+...
