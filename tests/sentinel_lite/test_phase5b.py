@@ -255,10 +255,15 @@ class TestSummarizeMobileElements(unittest.TestCase):
 
 class TestLoadMobileElements(unittest.TestCase):
     def test_empty_manifest(self):
-        els = report_lib.load_mobile_elements(
-            os.path.join(REPO, "workflow", "sentinel_lite",
-                         "mobile_elements.yaml"))
-        self.assertEqual(els, [])
+        fd, path = tempfile.mkstemp(suffix=".yaml")
+        os.close(fd)
+        with open(path, "w") as f:
+            f.write("elements: []\n")
+        try:
+            els = report_lib.load_mobile_elements(path)
+            self.assertEqual(els, [])
+        finally:
+            os.unlink(path)
 
     def test_malformed_entry_raises(self):
         fd, path = tempfile.mkstemp(suffix=".yaml")
