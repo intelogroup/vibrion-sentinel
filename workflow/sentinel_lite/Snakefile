@@ -183,7 +183,7 @@ rule kraken2_classify:
             kraken2 --db {KRAKEN_DB} --threads {threads} --paired \\
                 --output {output.out} --report {output.report} \\
                 {input.r1} {input.r2} 2> {OUTDIR}/02_kraken/kraken.log
-        else:
+        else
             kraken2 --db {KRAKEN_DB} --threads {threads} \\
                 --output {output.out} --report {output.report} \\
                 {input.r1} 2> {OUTDIR}/02_kraken/kraken.log
@@ -249,7 +249,7 @@ rule bwa_map:
         if [ "{PAIRED}" = "True" ]; then
             bwa-mem2 mem -t {threads} {REF} {input.r1} {input.r2} 2> {OUTDIR}/04_map/bwa-mem2.log \\
                 | samtools sort -@ {threads} -o {output.bam}
-        else:
+        else
             bwa-mem2 mem -t {threads} {REF} {input.r1} 2> {OUTDIR}/04_map/bwa-mem2.log \\
                 | samtools sort -@ {threads} -o {output.bam}
         fi
