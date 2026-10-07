@@ -33,32 +33,66 @@ jobs:
           set -euo pipefail
           mkdir -p refs_build && cd refs_build
 
+          # Retry helper: NCBI EUtils is flaky (transient empty responses,
+          # rate-limit 429s). A single bare curl used to kill the whole build
+          # on the first blip (run 37672605763 died on the PLE2 fetch). Never
+          # fail fast on a fetch: retry with backoff, validate header +
+          # minimum length, and only then accept the file.
+          efetch() { # efetch <url> <out> [min_seq_len]
+            local url="$1" out="$2" min_len="${3:-0}" attempt=1 seqlen
+            while [ "$attempt" -le 5 ]; do
+              if curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+                        --retry-max-time 120 --max-time 180 \
+                        "$url" -o "$out.tmp"; then
+                if [ "$(head -c 1 "$out.tmp")" = ">" ]; then
+                  seqlen=$(grep -v '^>' "$out.tmp" | tr -d '\n\r ' | wc -c || true)
+                  if [ "$seqlen" -ge "$min_len" ]; then
+                    mv "$out.tmp" "$out"
+                    echo "  ok: $out (${seqlen} bp, attempt ${attempt})"
+                    sleep 1  # stay polite to NCBI (<=3 req/sec)
+                    return 0
+                  fi
+                  echo "  too short (${seqlen} < ${min_len} bp): $out (attempt ${attempt})" >&2
+                else
+                  echo "  not FASTA: $out (attempt ${attempt})" >&2
+                fi
+              else
+                echo "  curl failed: $out (attempt ${attempt})" >&2
+              fi
+              rm -f "$out.tmp"
+              attempt=$((attempt + 1))
+              sleep 5
+            done
+            echo "ERROR: giving up on $out after 5 attempts" >&2
+            return 1
+          }
+
+          EUTILS="https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide"
+
           echo "▶ Fetching 2010EL-1786 (fasta)..."
-          curl -sL "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id=CP003069.1&rettype=fasta&retmode=text" -o chr1.fa
-          curl -sL "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id=CP003070.1&rettype=fasta&retmode=text" -o chr2.fa
+          # min lengths = 90% of the live record (CP003069.1: 3031375 bp,
+          # CP003070.1: 1046365 bp, measured 2026-10-07).
+          efetch "${EUTILS}&id=CP003069.1&rettype=fasta&retmode=text" chr1.fa 2728237
+          efetch "${EUTILS}&id=CP003070.1&rettype=fasta&retmode=text" chr2.fa 941728
           cat chr1.fa chr2.fa > 2010EL-1786.fasta
-          head -c 1 2010EL-1786.fasta | grep -q ">" || { echo "fasta fetch failed"; exit 1; }
 
           echo "▶ Fetching Haiti 2022 resurgence reference..."
-          curl -sL "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id=OQ860440.1&rettype=fasta&retmode=text" -o Haiti_2022_Resurgence.fasta
+          efetch "${EUTILS}&id=OQ860440.1&rettype=fasta&retmode=text" Haiti_2022_Resurgence.fasta
 
           echo "▶ Mobile-element reference sequences (Phase 5B.3/5B.4 screens)..."
           mkdir -p mobile_refs
-          EUTILS="https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide"
           # PLE islands: full element genomic sequences (canonical references).
-          curl -sL "${EUTILS}&id=PQ783903.1&rettype=fasta&retmode=text" -o mobile_refs/PLE11.fasta   # Mathur et al., Nature 2026 (Rta ~80 aa verified)
-          curl -sL "${EUTILS}&id=KC152960.1&rettype=fasta&retmode=text" -o mobile_refs/PLE1.fasta    # Seed lab canonical PLE1 (Seed et al., Nature 2013)
-          curl -sL "${EUTILS}&id=KC152961.1&rettype=fasta&retmode=text" -o mobile_refs/PLE2.fasta    # Seed lab canonical PLE2 (Seed et al., Nature 2013)
+          # min lengths = 90% of MANIFEST.tsv length_bp.
+          efetch "${EUTILS}&id=PQ783903.1&rettype=fasta&retmode=text" mobile_refs/PLE11.fasta 17288   # Mathur et al., Nature 2026 (Rta ~80 aa verified)
+          efetch "${EUTILS}&id=KC152960.1&rettype=fasta&retmode=text" mobile_refs/PLE1.fasta 16271    # Seed lab canonical PLE1 (Seed et al., Nature 2013)
+          efetch "${EUTILS}&id=KC152961.1&rettype=fasta&retmode=text" mobile_refs/PLE2.fasta 16569    # Seed lab canonical PLE2 (Seed et al., Nature 2013)
           # Defense systems: operon ranges from V. cholerae A1552 (CP028894.1),
           # locus-tag mapping per Adams et al., Nat Microbiol 2025 (Suppl. Tables 4/6/7).
           # GenBank annotates these as hypothetical proteins; the system
           # assignments below are the paper's, verified against the record.
-          curl -sL "${EUTILS}&id=CP028894.1&seq_start=1336122&seq_stop=1337812&rettype=fasta&retmode=text" -o mobile_refs/WonAB.fasta    # A1552VC_01233-34 (421+140 aa)
-          curl -sL "${EUTILS}&id=CP028894.1&seq_start=268546&seq_stop=272823&rettype=fasta&retmode=text" -o mobile_refs/GrwAB.fasta    # A1552VC_00274-75 (603+821 aa)
-          curl -sL "${EUTILS}&id=CP028894.1&seq_start=273189&seq_stop=275145&rettype=fasta&retmode=text" -o mobile_refs/VcSduA.fasta   # A1552VC_00276 (651 aa)
-          for f in mobile_refs/*.fasta; do
-            head -c 1 "$f" | grep -q ">" || { echo "fasta fetch failed: $f"; exit 1; }
-          done
+          efetch "${EUTILS}&id=CP028894.1&seq_start=1336122&seq_stop=1337812&rettype=fasta&retmode=text" mobile_refs/WonAB.fasta 1521    # A1552VC_01233-34 (421+140 aa)
+          efetch "${EUTILS}&id=CP028894.1&seq_start=268546&seq_stop=272823&rettype=fasta&retmode=text" mobile_refs/GrwAB.fasta 3850     # A1552VC_00274-75 (603+821 aa)
+          efetch "${EUTILS}&id=CP028894.1&seq_start=273189&seq_stop=275145&rettype=fasta&retmode=text" mobile_refs/VcSduA.fasta 1761    # A1552VC_00276 (651 aa)
           # Provenance manifest: accession, coords, length, source, verification.
           cat > mobile_refs/MANIFEST.tsv <<'EOF'
           file	accession	coords	length_bp	source_paper	verification
