@@ -275,8 +275,10 @@ jobs:
           import json, sys
           acc = sys.argv[1]
           qc = json.load(open(f"results/{acc}/report.json"))["qc"]
-          if qc["status"] != "pass":
+          if qc["status"] == "fail":
               print(f"::warning title=QC fail {acc}::" + "; ".join(qc["reasons"]))
+          elif qc["status"] == "provisional":
+              print(f"::warning title=QC provisional {acc}::" + "; ".join(qc["reasons"]))
           EOF
 
       - name: Push report to Supabase
@@ -343,14 +345,19 @@ jobs:
           ACC="${{ matrix.accession }}"
           # QC-fail consensus is mostly N (low-depth positions are masked) and
           # must never reach a cohort alignment -- gate on the report's verdict.
+          # Provisional consensuses go to a separate prefix: the watcher can
+          # alert on provisional samples (flagged) and Phase 4 confirmation
+          # needs them, but they stay out of the cohort phylogeny.
           QC=$(python3 -c "import json;print(json.load(open('results/${ACC}/report.json'))['qc']['status'])")
-          if [ "$QC" != "pass" ]; then
-            echo "qc status '$QC' -- not archiving consensus for $ACC"
+          if [ "$QC" = "fail" ]; then
+            echo "qc status 'fail' -- not archiving consensus for $ACC"
             exit 0
           fi
+          PREFIX="consensus"
+          [ "$QC" = "provisional" ] && PREFIX="consensus-provisional"
           gzip -c "results/${ACC}/06_variants/consensus.fasta" > "/tmp/${ACC}.fasta.gz"
           aws s3 cp "/tmp/${ACC}.fasta.gz" \
-            "s3://${R2_BUCKET}/consensus/${ACC}.fasta.gz" \
+            "s3://${R2_BUCKET}/${PREFIX}/${ACC}.fasta.gz" \
             --endpoint-url "$AWS_ENDPOINT_URL"
 
       - name: Upload results

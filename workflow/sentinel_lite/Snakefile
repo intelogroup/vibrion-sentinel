@@ -53,7 +53,11 @@ QC_MIN_MEAN_DEPTH = _QC["qc_min_mean_depth"]  # genome-wide mean depth
 QC_MIN_CALLED_PCT = _QC["qc_min_called_pct"]  # % of reference called (not masked)
 LOCUS_PRESENT_BREADTH = config.get("locus_present_breadth", 80)  # % of locus with >= 1 read
 LOCUS_ABSENT_BREADTH = config.get("locus_absent_breadth", 20)
-QC_MIN_SPECIES_PURITY = config.get("qc_min_species_purity", 90)  # % of kraken-processed reads classified as V. cholerae
+QC_MIN_SPECIES_PURITY = _QC["qc_min_species_purity"]  # % of kraken-processed reads classified as V. cholerae
+# Hard-fail floors (tiered QC gates): extreme contamination or <50% breadth
+# excludes the sample from all outputs. Provisional cutoffs above only flag.
+QC_HARD_MIN_CALLED_PCT = _QC["qc_hard_min_called_pct"]
+QC_HARD_MIN_SPECIES_PURITY = _QC["qc_hard_min_species_purity"]
 
 REF = f"{REFDIR}/2010EL-1786.fasta"
 KRAKEN_DB = f"{REFDIR}/kraken2_haiti_custom"
@@ -218,7 +222,13 @@ rule extract_vibrio:
 
 
 rule bwa_map:
-    """Illumina mapping vs 7PET reference. Skipped for platform=nanopore."""
+    """Illumina mapping vs 7PET reference (bwa-mem2, the maintained bwa
+    successor). Skipped for platform=nanopore.
+
+    NOTE: bwa-mem2 uses its own index format -- the reference bundle must be
+    built with `bwa-mem2 index` (see .github/workflows/build-references.yml),
+    not `bwa index`.
+    """
     input:
         r1=rules.extract_vibrio.output.r1,
         r2=rules.extract_vibrio.output.r2,
@@ -229,10 +239,10 @@ rule bwa_map:
         """
         mkdir -p {OUTDIR}/04_map
         if [ "{PAIRED}" = "True" ]; then
-            bwa mem -t {threads} {REF} {input.r1} {input.r2} 2> {OUTDIR}/04_map/bwa.log \\
+            bwa-mem2 mem -t {threads} {REF} {input.r1} {input.r2} 2> {OUTDIR}/04_map/bwa-mem2.log \\
                 | samtools sort -@ {threads} -o {output.bam}
         else:
-            bwa mem -t {threads} {REF} {input.r1} 2> {OUTDIR}/04_map/bwa.log \\
+            bwa-mem2 mem -t {threads} {REF} {input.r1} 2> {OUTDIR}/04_map/bwa-mem2.log \\
                 | samtools sort -@ {threads} -o {output.bam}
         fi
         samtools index {output.bam}
@@ -526,7 +536,7 @@ rule tool_versions:
             ("bcftools", ["bcftools", "--version"]),
         ]
         if PLATFORM == "illumina":
-            specs += [("fastp", ["fastp", "--version"]), ("bwa", ["bwa"])]
+            specs += [("fastp", ["fastp", "--version"]), ("bwa-mem2", ["bwa-mem2", "version"])]
         else:
             specs += [
                 ("nanoplot", ["NanoPlot", "--version"]),
@@ -587,6 +597,8 @@ def _run_report(input, output):
             "min_mean_depth": QC_MIN_MEAN_DEPTH,
             "min_called_pct": QC_MIN_CALLED_PCT,
             "min_species_purity": QC_MIN_SPECIES_PURITY,
+            "hard_min_called_pct": QC_HARD_MIN_CALLED_PCT,
+            "hard_min_species_purity": QC_HARD_MIN_SPECIES_PURITY,
         },
     )
 
@@ -634,6 +646,8 @@ def _run_report(input, output):
                 "min_mean_depth": QC_MIN_MEAN_DEPTH,
                 "min_called_pct": QC_MIN_CALLED_PCT,
                 "min_species_purity": QC_MIN_SPECIES_PURITY,
+                "hard_min_called_pct": QC_HARD_MIN_CALLED_PCT,
+                "hard_min_species_purity": QC_HARD_MIN_SPECIES_PURITY,
             },
         },
         "notes": "Lite tier: mapping-based, no de novo assembly. "

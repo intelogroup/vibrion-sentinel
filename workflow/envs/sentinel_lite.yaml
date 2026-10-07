@@ -7,7 +7,7 @@ dependencies:
   - snakemake>=8.0
   - fastp>=0.23
   - kraken2>=2.1
-  - bwa>=0.7.18
+  - bwa-mem2>=2.2.1  # maintained successor to bwa 0.7.x (index format differs: rebuild refs)
   - samtools>=1.18
   - bcftools>=1.18
   - seqkit>=2.5

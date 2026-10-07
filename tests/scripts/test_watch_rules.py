@@ -10,8 +10,10 @@ import watch_rules as wr  # noqa: E402
 FIXTURE = Path(__file__).parent.parent / "fixtures" / "backtest_rows.json"
 
 
-def row(acc, date, snps=40, qc="pass", priority="haiti", ctx=True, frac=0.99):
+def row(acc, date, snps=40, qc="pass", priority="haiti", ctx=True, frac=0.99,
+        o1=True):
     call = "present" if ctx else "absent"
+    o1_call = "present" if o1 else "absent"
     return {
         "accession": acc,
         "collection_date": date,
@@ -20,7 +22,12 @@ def row(acc, date, snps=40, qc="pass", priority="haiti", ctx=True, frac=0.99):
         "qc_status": qc,
         "snps_vs_7pet": snps,
         "v_cholerae_fraction": frac,
-        "surveillance_loci": {"ctxA": {"call": call}, "ctxB": {"call": call}},
+        "surveillance_loci": {
+            "ctxA": {"call": call},
+            "ctxB": {"call": call},
+            "wbeT": {"call": o1_call},
+            "rfbV": {"call": o1_call},
+        },
     }
 
 
@@ -47,8 +54,24 @@ class TestIsToxigenicO1(unittest.TestCase):
     def test_qc_fail_excluded(self):
         self.assertFalse(wr.is_toxigenic_o1(row("A", "2022-01-01", qc="fail")))
 
+    def test_provisional_qc_eligible_for_alerting(self):
+        # Tiered gates: provisional is usable for early alerting (flagged).
+        self.assertTrue(wr.is_toxigenic_o1(row("A", "2022-01-01", qc="provisional")))
+
     def test_missing_toxin_excluded(self):
         self.assertFalse(wr.is_toxigenic_o1(row("A", "2022-01-01", ctx=False)))
+
+    def test_non_o1_toxigenic_excluded(self):
+        # O139-like: toxin genes present, O1 antigen genes absent --
+        # must not be reported as O1.
+        self.assertFalse(wr.is_toxigenic_o1(row("A", "2022-01-01", o1=False)))
+
+    def test_missing_o1_loci_excluded(self):
+        # Panel without wbeT/rfbV cannot evidence O1: conservative exclusion.
+        r = row("A", "2022-01-01")
+        del r["surveillance_loci"]["wbeT"]
+        del r["surveillance_loci"]["rfbV"]
+        self.assertFalse(wr.is_toxigenic_o1(r))
 
     def test_purity_boundary(self):
         self.assertTrue(wr.is_toxigenic_o1(row("A", "2022-01-01", frac=0.9)))

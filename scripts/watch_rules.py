@@ -16,7 +16,7 @@ fixture without credentials.
 
 Row shape (dict), mirroring the sentinel_runs columns the rules need:
     accession, collection_date ("YYYY-MM-DD" | None), country (str | None),
-    priority ("haiti" | "global" | None), qc_status ("pass" | "fail"),
+    priority ("haiti" | "global" | None), qc_status ("pass" | "provisional" | "fail"),
     snps_vs_7pet (int | None), v_cholerae_fraction (float | None),
     surveillance_loci: {locus: {"call": "present" | ...}}
 
@@ -60,13 +60,24 @@ def locus_present(row, locus):
 
 
 def is_toxigenic_o1(row):
-    """QC-pass, V. cholerae-pure, cholera-toxin positive."""
-    if row.get("qc_status") != "pass":
+    """QC-pass/provisional, V. cholerae-pure, cholera-toxin positive,
+    O1-antigen positive.
+
+    O1 evidence (wbeT, rfbV) is required, not just the toxin genes: a
+    toxigenic non-O1 strain (e.g. O139) carries ctxAB but must not be
+    reported as O1. Rows whose loci panel lacks wbeT/rfbV cannot claim O1
+    and are excluded -- conservative by design.
+    'provisional' QC is eligible (tiered gates: usable for early alerting,
+    flagged); only hard 'fail' is excluded.
+    """
+    if row.get("qc_status") not in ("pass", "provisional"):
         return False
     frac = row.get("v_cholerae_fraction")
     if frac is None or float(frac) < MIN_PURITY:
         return False
-    return locus_present(row, "ctxA") and locus_present(row, "ctxB")
+    toxin = locus_present(row, "ctxA") and locus_present(row, "ctxB")
+    o1 = locus_present(row, "wbeT") and locus_present(row, "rfbV")
+    return toxin and o1
 
 
 def is_haiti(row):

@@ -162,20 +162,44 @@ def read_snp_count(path):
 
 
 def evaluate_qc(mean_depth, called_pct, species_purity_pct, thresholds):
-    """(status, reasons) where status is 'pass' or 'fail'. thresholds is
-    {min_mean_depth, min_called_pct, min_species_purity}. Each failing
-    check appends one human-readable reason; qc.reasons in report.json is
-    this list."""
+    """(status, reasons) where status is 'pass', 'provisional', or 'fail'.
+
+    Tiered gates, each traceable to a published standard (see the FP/FN
+    reduction plan):
+    - hard 'fail' (excluded from all outputs): extreme contamination
+      (species_purity_pct < hard_min_species_purity, default 95 -- >5%
+      non-Vibrio reads, FWD-AMR-RefLabCap 2022) or <50% breadth
+      (hard_min_called_pct, default 50 -- Kenya 2022-23 outbreak paper).
+    - 'provisional' (usable for early alerting, flagged; excluded from
+      public-facing summaries): below the strict cutoffs -- mean_depth <
+      min_mean_depth (default 30, FWD-AMR-RefLabCap), called_pct <
+      min_called_pct (default 90), or species_purity_pct <
+      min_species_purity (default 99, PulseNet's 1% secondary-abundance bar).
+    - 'pass' otherwise.
+    thresholds keys: min_mean_depth, min_called_pct, min_species_purity,
+    hard_min_called_pct, hard_min_species_purity. Reasons list every
+    breached gate with its threshold, so the report shows its work.
+    """
+    hard = []
+    if species_purity_pct < thresholds["hard_min_species_purity"]:
+        hard.append(f"species_purity {species_purity_pct:.2f} < "
+                    f"{thresholds['hard_min_species_purity']} (hard fail)")
+    if called_pct < thresholds["hard_min_called_pct"]:
+        hard.append(f"called_pct {called_pct:.2f} < "
+                    f"{thresholds['hard_min_called_pct']} (hard fail)")
+    if hard:
+        return "fail", hard
     reasons = []
     if mean_depth < thresholds["min_mean_depth"]:
         reasons.append(f"mean_depth {mean_depth:.2f} < {thresholds['min_mean_depth']}")
     if called_pct < thresholds["min_called_pct"]:
         reasons.append(f"called_pct {called_pct:.2f} < {thresholds['min_called_pct']}")
     if species_purity_pct < thresholds["min_species_purity"]:
-        reasons.append(
-            f"species_purity {species_purity_pct:.2f} < {thresholds['min_species_purity']}"
-        )
-    return ("fail" if reasons else "pass"), reasons
+        reasons.append(f"species_purity {species_purity_pct:.2f} < "
+                       f"{thresholds['min_species_purity']}")
+    if reasons:
+        return "provisional", reasons
+    return "pass", []
 
 
 # ---------------------------------------------------------------------------
@@ -189,12 +213,17 @@ VALID_BASECALLERS = ("fast", "hac", "sup")
 
 PIPELINE_VERSION = "0.2.0"
 
-# Nanopore: homopolymer noise means stricter depth, looser per-base
-# expectations (ends of long reads drop out). Illumina values are the
-# pre-Phase-0 defaults, unchanged.
+# Tiered QC gates (see evaluate_qc): provisional cutoffs, plus hard-fail floors.
+# Provisional defaults: FWD-AMR-RefLabCap (>=30x; >5% off-species contaminated),
+# PulseNet PT SOP (<=1% secondary species). Hard floors: Kenya 2022-23 outbreak
+# paper (<50% breadth excluded).
 PLATFORM_QC_DEFAULTS = {
-    "illumina": {"min_site_depth": 10, "qc_min_mean_depth": 20, "qc_min_called_pct": 90},
-    "nanopore": {"min_site_depth": 15, "qc_min_mean_depth": 30, "qc_min_called_pct": 85},
+    "illumina": {"min_site_depth": 10, "qc_min_mean_depth": 30, "qc_min_called_pct": 90,
+                 "qc_min_species_purity": 99,
+                 "qc_hard_min_called_pct": 50, "qc_hard_min_species_purity": 95},
+    "nanopore": {"min_site_depth": 15, "qc_min_mean_depth": 30, "qc_min_called_pct": 85,
+                 "qc_min_species_purity": 99,
+                 "qc_hard_min_called_pct": 50, "qc_hard_min_species_purity": 95},
 }
 
 # Assembly QC gate (fail loudly): a fragmented assembly must never produce
@@ -252,7 +281,8 @@ def validate_platform_config(config):
 def platform_qc_thresholds(config, platform):
     """QC thresholds for a platform: platform defaults, with explicit
     config values winning. Keys: min_site_depth, qc_min_mean_depth,
-    qc_min_called_pct."""
+    qc_min_called_pct, qc_min_species_purity, qc_hard_min_called_pct,
+    qc_hard_min_species_purity."""
     defaults = PLATFORM_QC_DEFAULTS[platform]
     return {k: config.get(k, v) for k, v in defaults.items()}
 

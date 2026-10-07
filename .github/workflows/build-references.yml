@@ -1,9 +1,11 @@
 name: Build sentinel reference bundle
 
 # One-time (re-run when references change): builds the Haiti kraken2 DB,
-# serogroup DB and 7PET reference + BWA index (surveillance loci BED is
+# serogroup DB and 7PET reference + bwa-mem2 index (surveillance loci BED is
 # curated in workflow/sentinel_lite/, not built here),
 # then publishes them as a GitHub Release asset consumed by sentinel-watch.
+# NOTE: bwa-mem2 index format differs from bwa -- rebuild the release after
+# any mapper change; old bundles' .bwt/.sa files will NOT work.
 
 on:
   workflow_dispatch:
@@ -40,8 +42,8 @@ jobs:
           echo "▶ Fetching Haiti 2022 resurgence reference..."
           curl -sL "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id=OQ860440.1&rettype=fasta&retmode=text" -o Haiti_2022_Resurgence.fasta
 
-          echo "▶ BWA index..."
-          bwa index 2010EL-1786.fasta
+          echo "▶ bwa-mem2 index..."
+          bwa-mem2 index 2010EL-1786.fasta
 
           echo "▶ Haiti custom kraken2 DB..."
           bash ../scripts/build_haiti_kraken_db.sh kraken2_haiti_custom 2
