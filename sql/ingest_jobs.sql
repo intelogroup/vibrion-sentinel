@@ -32,7 +32,7 @@ create table if not exists ingest_jobs (
     constraint ingest_jobs_tier_chk
         check (tier in ('lite', 'assembly')),
     constraint ingest_jobs_basecaller_chk
-        check (platform <> 'nanopore' or basecaller_model in ('fast', 'hac', 'sup')),
+        check (platform <> 'nanopore' or (basecaller_model is not null and basecaller_model in ('fast', 'hac', 'sup'))),
     constraint ingest_jobs_assembly_chk
         check (tier <> 'assembly' or platform = 'nanopore')
 );
