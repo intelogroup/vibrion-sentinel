@@ -1,6 +1,8 @@
 # Phase 5B.3/5B.4 — mobile-element screen manifest (PLE islands, anti-phage
-# defense systems). EMPTY BY DEFAULT: the screen reports "not_screened" until
-# versioned reference sequences with verified provenance are added here.
+# defense systems). POPULATED 2026-10-07: all 6 refs extracted from pinned
+# release sentinel-refs-v1 (bundle rebuilt by Actions run 37689388666;
+# every fasta's sequence length + GenBank accession + organism verified
+# against the downloaded tarball before this fill).
 #
 # Provenance rule (hard): every ref_fasta must come from a published reference
 # sequence verified against its GenBank record (accession recorded below).
@@ -9,13 +11,61 @@
 # Schema per element:
 #   - id: PLE11            # short id, used in report.json
 #     name: "PLE11 (ICP1 satellite)"
-#     ref_fasta: data/references/ple/PLE11.fasta
+#     ref_fasta: mobile_refs/PLE11.fasta   # path inside the pinned release tarball
+#     release: sentinel-refs-v1            # pinned release tag (never float)
 #     accession: "..."      # GenBank accession of the source record
+#     coords: "..."         # when the fasta is a coordinate slice of the record
+#     length_bp: 19209     # verified sequence length (fail-closed check)
 #     citation: "Mathur et al., Nature 2026"
 #     breadth_present: 80  # optional overrides of the defaults
 #
-# Candidates awaiting verified refs: PLE1, PLE11, PLE2 (Mathur et al., Nature
-# 2026; Barton et al., Nature 2026); WonAB, GrwAB, Shedu/VcSduA, dDmABC, CBASS
-# (Adams et al., Nat Microbiol 2025).
+# Candidates still awaiting verified refs (fail-closed: NOT listed here):
+# dDmABC, CBASS (Adams et al., Nat Microbiol 2025).
+#
 
-elements: []
+elements:
+  - id: PLE11
+    name: "PLE11 (ICP1 satellite)"
+    ref_fasta: mobile_refs/PLE11.fasta
+    release: sentinel-refs-v1
+    accession: "PQ783903.1"
+    length_bp: 19209
+    citation: "Mathur et al., Nature 2026 (PMID 41813903)"
+  - id: PLE1
+    name: "PLE1 (ICP1 satellite)"
+    ref_fasta: mobile_refs/PLE1.fasta
+    release: sentinel-refs-v1
+    accession: "KC152960.1"
+    length_bp: 18079
+    citation: "Seed et al., Nature 2013 (PLE discovery)"
+  - id: PLE2
+    name: "PLE2 (ICP1 satellite)"
+    ref_fasta: mobile_refs/PLE2.fasta
+    release: sentinel-refs-v1
+    accession: "KC152961.1"
+    length_bp: 18410
+    citation: "Seed et al., Nature 2013 (PLE discovery)"
+  - id: WonAB
+    name: "WonAB (anti-phage defense)"
+    ref_fasta: mobile_refs/WonAB.fasta
+    release: sentinel-refs-v1
+    accession: "CP028894.1"
+    coords: "1336122-1337812"
+    length_bp: 1691
+    citation: "Adams et al., Nat Microbiol 2025 (Suppl. Table 4)"
+  - id: GrwAB
+    name: "GrwAB (GmrSD-like Type IV restriction)"
+    ref_fasta: mobile_refs/GrwAB.fasta
+    release: sentinel-refs-v1
+    accession: "CP028894.1"
+    coords: "268546-272823"
+    length_bp: 4278
+    citation: "Adams et al., Nat Microbiol 2025 (Suppl. Table 6)"
+  - id: VcSduA
+    name: "VcSduA (Shedu-family nuclease)"
+    ref_fasta: mobile_refs/VcSduA.fasta
+    release: sentinel-refs-v1
+    accession: "CP028894.1"
+    coords: "273189-275145"
+    length_bp: 1957
+    citation: "Adams et al., Nat Microbiol 2025 (Suppl. Table 7)"
