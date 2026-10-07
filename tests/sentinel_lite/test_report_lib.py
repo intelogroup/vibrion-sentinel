@@ -269,33 +269,58 @@ class TestReadSnpCount(unittest.TestCase):
 
 
 class TestEvaluateQc(unittest.TestCase):
-    THRESHOLDS = {"min_mean_depth": 20, "min_called_pct": 90, "min_species_purity": 90}
+    THRESHOLDS = {"min_mean_depth": 30, "min_called_pct": 90,
+                  "min_species_purity": 99, "hard_min_called_pct": 50,
+                  "hard_min_species_purity": 95}
 
     def test_all_pass(self):
-        status, reasons = report_lib.evaluate_qc(50.0, 98.0, 99.0, self.THRESHOLDS)
+        status, reasons = report_lib.evaluate_qc(50.0, 98.0, 99.5, self.THRESHOLDS)
         self.assertEqual(status, "pass")
         self.assertEqual(reasons, [])
 
-    def test_fails_on_depth_only(self):
-        status, reasons = report_lib.evaluate_qc(0.03, 98.0, 99.0, self.THRESHOLDS)
-        self.assertEqual(status, "fail")
+    def test_provisional_on_depth_only(self):
+        # 20x was a hard fail under the old single gate; tiered gates make
+        # it provisional (usable for early alerting, flagged).
+        status, reasons = report_lib.evaluate_qc(20.0, 95.0, 99.5, self.THRESHOLDS)
+        self.assertEqual(status, "provisional")
         self.assertEqual(len(reasons), 1)
         self.assertIn("mean_depth", reasons[0])
 
-    def test_fails_on_all_three_independently(self):
-        # this is the real ERR11684929 case: every one of these fails at once
+    def test_provisional_on_breadth(self):
+        status, reasons = report_lib.evaluate_qc(50.0, 80.0, 99.5, self.THRESHOLDS)
+        self.assertEqual(status, "provisional")
+        self.assertIn("called_pct", reasons[0])
+
+    def test_provisional_on_purity(self):
+        status, reasons = report_lib.evaluate_qc(50.0, 95.0, 97.0, self.THRESHOLDS)
+        self.assertEqual(status, "provisional")
+        self.assertIn("species_purity", reasons[0])
+
+    def test_hard_fail_on_contamination(self):
+        # >5% non-Vibrio reads: excluded from all outputs (FWD-AMR-RefLabCap).
+        status, reasons = report_lib.evaluate_qc(50.0, 95.0, 90.0, self.THRESHOLDS)
+        self.assertEqual(status, "fail")
+        self.assertIn("hard fail", reasons[0])
+
+    def test_hard_fail_on_breadth(self):
+        # <50% breadth: excluded (Kenya 2022-23 outbreak paper gate).
+        status, reasons = report_lib.evaluate_qc(50.0, 40.0, 99.5, self.THRESHOLDS)
+        self.assertEqual(status, "fail")
+        self.assertIn("hard fail", reasons[0])
+
+    def test_hard_fail_reports_each_breach(self):
         status, reasons = report_lib.evaluate_qc(0.01, 0.0, 0.08, self.THRESHOLDS)
         self.assertEqual(status, "fail")
-        self.assertEqual(len(reasons), 3)
+        self.assertEqual(len(reasons), 2)
 
     def test_exactly_at_threshold_passes(self):
         # boundary: >= threshold passes, not > threshold
-        status, reasons = report_lib.evaluate_qc(20.0, 90.0, 90.0, self.THRESHOLDS)
+        status, reasons = report_lib.evaluate_qc(30.0, 90.0, 99.0, self.THRESHOLDS)
         self.assertEqual(status, "pass")
 
-    def test_just_below_threshold_fails(self):
-        status, reasons = report_lib.evaluate_qc(19.99, 90.0, 90.0, self.THRESHOLDS)
-        self.assertEqual(status, "fail")
+    def test_just_below_provisional_threshold_flagged(self):
+        status, reasons = report_lib.evaluate_qc(29.99, 90.0, 99.0, self.THRESHOLDS)
+        self.assertEqual(status, "provisional")
         self.assertEqual(len(reasons), 1)
 
 

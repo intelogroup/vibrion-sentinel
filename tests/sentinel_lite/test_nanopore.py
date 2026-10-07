@@ -70,11 +70,16 @@ class TestPlatformQcThresholds(unittest.TestCase):
         self.assertEqual(t["qc_min_mean_depth"], 30)
         self.assertEqual(t["qc_min_called_pct"], 85)
 
-    def test_illumina_defaults_unchanged(self):
+    def test_illumina_tiered_defaults(self):
+        # Tiered QC gates (2026-10-07): provisional cutoffs grounded in
+        # FWD-AMR-RefLabCap / PulseNet; hard floors from Kenya 2022-23.
         t = report_lib.platform_qc_thresholds({}, "illumina")
         self.assertEqual(t["min_site_depth"], 10)
-        self.assertEqual(t["qc_min_mean_depth"], 20)
+        self.assertEqual(t["qc_min_mean_depth"], 30)
         self.assertEqual(t["qc_min_called_pct"], 90)
+        self.assertEqual(t["qc_min_species_purity"], 99)
+        self.assertEqual(t["qc_hard_min_called_pct"], 50)
+        self.assertEqual(t["qc_hard_min_species_purity"], 95)
 
     def test_explicit_config_wins(self):
         t = report_lib.platform_qc_thresholds({"qc_min_mean_depth": 50}, "nanopore")
