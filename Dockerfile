@@ -82,3 +82,27 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Default command: run fast triage
 ENTRYPOINT ["python", "/app/scripts/fast_triage.py"]
 CMD ["--help"]
+
+# Stage 3: ingest service (Phase 1). Extends the pipeline runtime image so the
+# worker has the full bioinformatics toolchain (snakemake, flye, medaka, ...)
+# and the API shares the exact same codebase. Default target stays `runtime`;
+# build this stage explicitly for the service.
+FROM runtime AS service
+
+USER root
+
+# Service Python deps (FastAPI app + worker). The vibrion conda env's pip is
+# used so there is one Python per image.
+COPY service/requirements.txt /app/service/requirements.txt
+RUN /opt/conda/envs/vibrion/bin/pip install --no-cache-dir \
+        -r /app/service/requirements.txt
+
+# Service code (app, worker, key CLI).
+COPY service/ /app/service/
+
+# The worker writes pipeline configs referencing this Snakefile; already in
+# the image via the runtime stage (/app/workflow). REPO_DIR defaults to /app.
+ENV REPO_DIR=/app
+ENV WORKER_WORKDIR=/tmp/sentinel-work
+
+EXPOSE 8000
