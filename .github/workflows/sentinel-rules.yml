@@ -1,0 +1,56 @@
+name: Sentinel recurrence/cluster rules
+
+# Evaluates the R1 (recurrence after quiet years) and R2 (spatiotemporal
+# cluster) rules over the sentinel_runs table, records firings in
+# sentinel_alerts (deduplicated), and pushes ntfy notifications.
+#
+# The rules themselves live in scripts/watch_rules.py (pure functions, unit
+# tested). This workflow is only scheduling + I/O. Run it after the
+# sentinel-watch workflow has had a chance to ingest new accessions;
+# daily is plenty -- the rules look back over years of history.
+
+on:
+  schedule:
+    - cron: "23 7 * * *"  # daily ~07:23 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Evaluate and print findings without writing alerts or notifying"
+        required: false
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+      quiet_years:
+        description: "Quiet-period threshold for R1 (years)"
+        required: false
+        default: "2"
+
+jobs:
+  rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Evaluate recurrence/cluster rules
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
+          NTFY_TOPIC: ${{ secrets.NTFY_SENTINEL_TOPIC }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY not set -- skipping rules evaluation"
+            exit 0
+          fi
+          ARGS=(--quiet-years "${{ inputs.quiet_years || '2' }}")
+          if [ "${{ inputs.dry_run || 'false' }}" = "true" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ARGS+=(--dry-run)
+          fi
+          # Scheduled runs always act (write alerts + notify); manual runs
+          # default to dry-run unless explicitly disabled.
+          python3 scripts/watch_rules.py "${ARGS[@]}"

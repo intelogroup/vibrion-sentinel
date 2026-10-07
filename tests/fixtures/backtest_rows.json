@@ -1,0 +1,4901 @@
+[
+ {
+  "accession": "SRR1267422",
+  "collection_date": "2012",
+  "country": "Haiti",
+  "priority": "haiti",
+  "qc_status": "fail",
+  "snps_vs_7pet": 25,
+  "v_cholerae_fraction": 0.029,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "absent"
+   },
+   "tcpA": {
+    "call": "absent"
+   },
+   "tcpB": {
+    "call": "absent"
+   },
+   "toxT": {
+    "call": "absent"
+   },
+   "toxR": {
+    "call": "absent"
+   },
+   "gyrA": {
+    "call": "absent"
+   },
+   "parC": {
+    "call": "absent"
+   },
+   "parE": {
+    "call": "absent"
+   },
+   "rtxA": {
+    "call": "absent"
+   },
+   "ctxB": {
+    "call": "absent"
+   },
+   "ctxA": {
+    "call": "absent"
+   },
+   "zot": {
+    "call": "absent"
+   },
+   "ace": {
+    "call": "absent"
+   },
+   "wbeT": {
+    "call": "absent"
+   },
+   "rfbV": {
+    "call": "absent"
+   },
+   "hlyA": {
+    "call": "absent"
+   }
+  }
+ },
+ {
+  "accession": "SRR1267526",
+  "collection_date": "2012",
+  "country": "Haiti",
+  "priority": "haiti",
+  "qc_status": "fail",
+  "snps_vs_7pet": 23,
+  "v_cholerae_fraction": 0.0017,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "absent"
+   },
+   "tcpA": {
+    "call": "absent"
+   },
+   "tcpB": {
+    "call": "absent"
+   },
+   "toxT": {
+    "call": "absent"
+   },
+   "toxR": {
+    "call": "absent"
+   },
+   "gyrA": {
+    "call": "absent"
+   },
+   "parC": {
+    "call": "absent"
+   },
+   "parE": {
+    "call": "absent"
+   },
+   "rtxA": {
+    "call": "absent"
+   },
+   "ctxB": {
+    "call": "absent"
+   },
+   "ctxA": {
+    "call": "absent"
+   },
+   "zot": {
+    "call": "absent"
+   },
+   "ace": {
+    "call": "absent"
+   },
+   "wbeT": {
+    "call": "absent"
+   },
+   "rfbV": {
+    "call": "absent"
+   },
+   "hlyA": {
+    "call": "absent"
+   }
+  }
+ },
+ {
+  "accession": "SRR1533760",
+  "collection_date": "2013-05-06",
+  "country": "Haiti: Saint Marc",
+  "priority": "haiti",
+  "qc_status": "fail",
+  "snps_vs_7pet": 12,
+  "v_cholerae_fraction": 0.8666,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR1533778",
+  "collection_date": "2013-05-06",
+  "country": "Haiti: Saint Marc",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 11,
+  "v_cholerae_fraction": 0.9058,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "partial"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR1533780",
+  "collection_date": "2013-05-06",
+  "country": "Haiti: Saint Marc",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 12,
+  "v_cholerae_fraction": 0.91,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "partial"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR1533782",
+  "collection_date": "2013-05-06",
+  "country": "Haiti: Saint Marc",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 11,
+  "v_cholerae_fraction": 0.9028,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR22265443",
+  "collection_date": "2022-10-04",
+  "country": "Haiti",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 45,
+  "v_cholerae_fraction": 0.9949,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR22265444",
+  "collection_date": "2022-10-03",
+  "country": "Haiti",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 42,
+  "v_cholerae_fraction": 0.9931,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR22265464",
+  "collection_date": "2018-06-30",
+  "country": "Haiti: Gressier",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 42,
+  "v_cholerae_fraction": 0.9962,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR22265465",
+  "collection_date": "2018-06-08",
+  "country": "Haiti: Gressier",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 41,
+  "v_cholerae_fraction": 0.996,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR22265466",
+  "collection_date": "2018-06-07",
+  "country": "Haiti: Gressier",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 42,
+  "v_cholerae_fraction": 0.9952,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR22265467",
+  "collection_date": "2018-06-06",
+  "country": "Haiti: Gressier",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 41,
+  "v_cholerae_fraction": 0.9948,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR23510629",
+  "collection_date": null,
+  "country": "Haiti",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 41,
+  "v_cholerae_fraction": 0.9957,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR23510635",
+  "collection_date": null,
+  "country": "Haiti",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 40,
+  "v_cholerae_fraction": 0.9937,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003587",
+  "collection_date": "2022-11-10",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 45,
+  "v_cholerae_fraction": 0.9947,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003588",
+  "collection_date": "2022-11-10",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 44,
+  "v_cholerae_fraction": 0.995,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003589",
+  "collection_date": "2022-11-10",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 44,
+  "v_cholerae_fraction": 0.9957,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003590",
+  "collection_date": "2022-11-10",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 44,
+  "v_cholerae_fraction": 0.995,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003591",
+  "collection_date": "2022-11-10",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 45,
+  "v_cholerae_fraction": 0.9951,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003592",
+  "collection_date": "2022-11-10",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 44,
+  "v_cholerae_fraction": 0.9948,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003602",
+  "collection_date": "2022-11-16",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 46,
+  "v_cholerae_fraction": 0.9943,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003603",
+  "collection_date": "2022-11-10",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 44,
+  "v_cholerae_fraction": 0.9948,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003604",
+  "collection_date": "2022-11-16",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 45,
+  "v_cholerae_fraction": 0.9883,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003605",
+  "collection_date": "2022-11-16",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 45,
+  "v_cholerae_fraction": 0.9944,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003612",
+  "collection_date": "2022-11-15",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 44,
+  "v_cholerae_fraction": 0.9957,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003613",
+  "collection_date": "2022-11-15",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 45,
+  "v_cholerae_fraction": 0.9954,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003614",
+  "collection_date": "2022-11-09",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 46,
+  "v_cholerae_fraction": 0.9956,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003615",
+  "collection_date": "2022-11-15",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 45,
+  "v_cholerae_fraction": 0.9947,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003616",
+  "collection_date": "2022-11-15",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 45,
+  "v_cholerae_fraction": 0.9945,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003617",
+  "collection_date": "2022-11-15",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 44,
+  "v_cholerae_fraction": 0.994,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003618",
+  "collection_date": "2022-11-15",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 43,
+  "v_cholerae_fraction": 0.9947,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003619",
+  "collection_date": "2022-11-15",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 45,
+  "v_cholerae_fraction": 0.9951,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003620",
+  "collection_date": "2022-11-15",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 45,
+  "v_cholerae_fraction": 0.9959,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003621",
+  "collection_date": "2022-11-15",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 44,
+  "v_cholerae_fraction": 0.9924,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003622",
+  "collection_date": "2022-11-15",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 44,
+  "v_cholerae_fraction": 0.9927,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003623",
+  "collection_date": "2022-11-10",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 45,
+  "v_cholerae_fraction": 0.994,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR24003624",
+  "collection_date": "2022-11-10",
+  "country": "Haiti: Port au Prince",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 44,
+  "v_cholerae_fraction": 0.9952,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR4039820",
+  "collection_date": "2011",
+  "country": "Haiti: Centre",
+  "priority": "haiti",
+  "qc_status": "fail",
+  "snps_vs_7pet": 60174,
+  "v_cholerae_fraction": 0.8734,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "absent"
+   },
+   "tcpA": {
+    "call": "absent"
+   },
+   "tcpB": {
+    "call": "absent"
+   },
+   "toxT": {
+    "call": "absent"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "absent"
+   },
+   "ctxA": {
+    "call": "absent"
+   },
+   "zot": {
+    "call": "absent"
+   },
+   "ace": {
+    "call": "absent"
+   },
+   "wbeT": {
+    "call": "partial"
+   },
+   "rfbV": {
+    "call": "absent"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR5986115",
+  "collection_date": "2013-04-22",
+  "country": "Haiti",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 27,
+  "v_cholerae_fraction": 0.9902,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR770779",
+  "collection_date": "2010-10-20",
+  "country": "Haiti",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 9,
+  "v_cholerae_fraction": 0.9495,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR773027",
+  "collection_date": "2011-06-09",
+  "country": "Haiti",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 11,
+  "v_cholerae_fraction": 0.9771,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "partial"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR773107",
+  "collection_date": "2011-09-02",
+  "country": "Haiti",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 10,
+  "v_cholerae_fraction": 0.9536,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "partial"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR773321",
+  "collection_date": "2011-10-12",
+  "country": "Haiti",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 13,
+  "v_cholerae_fraction": 0.9549,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "partial"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR773397",
+  "collection_date": "2012-03-13",
+  "country": "Haiti",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 13,
+  "v_cholerae_fraction": 0.977,
+  "surveillance_loci": {
+   "floR": {
+    "call": "absent"
+   },
+   "strB": {
+    "call": "absent"
+   },
+   "strA": {
+    "call": "absent"
+   },
+   "sul2": {
+    "call": "partial"
+   },
+   "dfrA1": {
+    "call": "partial"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR773656",
+  "collection_date": "2010-10-19",
+  "country": "Haiti: Centre",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 9,
+  "v_cholerae_fraction": 0.9455,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "partial"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR773657",
+  "collection_date": "2010-11-03",
+  "country": "Haiti: Ouest",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 8,
+  "v_cholerae_fraction": 0.945,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR773658",
+  "collection_date": "2010-11-03",
+  "country": "Haiti: Ouest",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 9,
+  "v_cholerae_fraction": 0.9519,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR773660",
+  "collection_date": "2010-11-27",
+  "country": "Haiti: Sud",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 8,
+  "v_cholerae_fraction": 0.9476,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "partial"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR775129",
+  "collection_date": "2011-01-26",
+  "country": "Haiti: Nord-Ouest",
+  "priority": "haiti",
+  "qc_status": "fail",
+  "snps_vs_7pet": 9,
+  "v_cholerae_fraction": 0.8795,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364273",
+  "collection_date": "2016-08-16",
+  "country": "Haiti",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 41,
+  "v_cholerae_fraction": 0.9819,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364278",
+  "collection_date": "2016-09-06",
+  "country": "Haiti: CTC Jacmel",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 39,
+  "v_cholerae_fraction": 0.9834,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364291",
+  "collection_date": "2017-02-24",
+  "country": "Haiti: CTC Gressier",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 38,
+  "v_cholerae_fraction": 0.9818,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364323",
+  "collection_date": "2016-02-15",
+  "country": "Haiti: St. Michel Hospital, Jacmel",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 37,
+  "v_cholerae_fraction": 0.9775,
+  "surveillance_loci": {
+   "floR": {
+    "call": "absent"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364326",
+  "collection_date": "2017-01-13",
+  "country": "Haiti: CTC Gressier",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 43,
+  "v_cholerae_fraction": 0.977,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364347",
+  "collection_date": "2014-11-12",
+  "country": "Haiti",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 37,
+  "v_cholerae_fraction": 0.994,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364352",
+  "collection_date": "2014-11-28",
+  "country": "Haiti: CTC Petit Goave",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 36,
+  "v_cholerae_fraction": 0.9953,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364373",
+  "collection_date": "2014-09-16",
+  "country": "Haiti: CTC Lestere",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 32,
+  "v_cholerae_fraction": 0.9941,
+  "surveillance_loci": {
+   "floR": {
+    "call": "absent"
+   },
+   "strB": {
+    "call": "absent"
+   },
+   "strA": {
+    "call": "absent"
+   },
+   "sul2": {
+    "call": "absent"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364376",
+  "collection_date": "2014-09-16",
+  "country": "Haiti: CTC Gonaives",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 33,
+  "v_cholerae_fraction": 0.9928,
+  "surveillance_loci": {
+   "floR": {
+    "call": "absent"
+   },
+   "strB": {
+    "call": "partial"
+   },
+   "strA": {
+    "call": "absent"
+   },
+   "sul2": {
+    "call": "absent"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364378",
+  "collection_date": "2014-10-16",
+  "country": "Haiti: CTC Gressier",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 38,
+  "v_cholerae_fraction": 0.9936,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364407",
+  "collection_date": "2017-02-20",
+  "country": "Haiti: CTC Gressier",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 37,
+  "v_cholerae_fraction": 0.9763,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364410",
+  "collection_date": "2017-02-21",
+  "country": "Haiti: CTC Gressier",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 38,
+  "v_cholerae_fraction": 0.9711,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364411",
+  "collection_date": "2017-02-21",
+  "country": "Haiti: CTC Gressier",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 38,
+  "v_cholerae_fraction": 0.9807,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364412",
+  "collection_date": "2016-10-11",
+  "country": "Haiti: CTC Gressier",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 42,
+  "v_cholerae_fraction": 0.9835,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364420",
+  "collection_date": "2015-10-21",
+  "country": "Haiti: CTC Jacmel",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 36,
+  "v_cholerae_fraction": 0.9752,
+  "surveillance_loci": {
+   "floR": {
+    "call": "absent"
+   },
+   "strB": {
+    "call": "absent"
+   },
+   "strA": {
+    "call": "absent"
+   },
+   "sul2": {
+    "call": "absent"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364423",
+  "collection_date": "2016-09-27",
+  "country": "Haiti: CTC Gressier",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 37,
+  "v_cholerae_fraction": 0.9754,
+  "surveillance_loci": {
+   "floR": {
+    "call": "present"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364427",
+  "collection_date": "2015-12-03",
+  "country": "Haiti: CTC Jacmel",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 37,
+  "v_cholerae_fraction": 0.9809,
+  "surveillance_loci": {
+   "floR": {
+    "call": "absent"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364441",
+  "collection_date": "2015-11-20",
+  "country": "Haiti: CTC Jacmel",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 36,
+  "v_cholerae_fraction": 0.984,
+  "surveillance_loci": {
+   "floR": {
+    "call": "absent"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364444",
+  "collection_date": "2015-11-13",
+  "country": "Haiti: CTC Gressier",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 38,
+  "v_cholerae_fraction": 0.9818,
+  "surveillance_loci": {
+   "floR": {
+    "call": "absent"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ },
+ {
+  "accession": "SRR8364445",
+  "collection_date": "2015-11-19",
+  "country": "Haiti: CTC Gressier",
+  "priority": "haiti",
+  "qc_status": "pass",
+  "snps_vs_7pet": 40,
+  "v_cholerae_fraction": 0.9843,
+  "surveillance_loci": {
+   "floR": {
+    "call": "absent"
+   },
+   "strB": {
+    "call": "present"
+   },
+   "strA": {
+    "call": "present"
+   },
+   "sul2": {
+    "call": "present"
+   },
+   "dfrA1": {
+    "call": "present"
+   },
+   "tcpA": {
+    "call": "present"
+   },
+   "tcpB": {
+    "call": "present"
+   },
+   "toxT": {
+    "call": "present"
+   },
+   "toxR": {
+    "call": "present"
+   },
+   "gyrA": {
+    "call": "present"
+   },
+   "parC": {
+    "call": "present"
+   },
+   "parE": {
+    "call": "present"
+   },
+   "rtxA": {
+    "call": "present"
+   },
+   "ctxB": {
+    "call": "present"
+   },
+   "ctxA": {
+    "call": "present"
+   },
+   "zot": {
+    "call": "present"
+   },
+   "ace": {
+    "call": "present"
+   },
+   "wbeT": {
+    "call": "present"
+   },
+   "rfbV": {
+    "call": "present"
+   },
+   "hlyA": {
+    "call": "present"
+   }
+  }
+ }
+]
