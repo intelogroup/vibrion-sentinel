@@ -263,10 +263,49 @@ def format_finding(f):
                 f"{f['collection_date']} after {f['gap_years']} quiet years "
                 f"(previous: {f['previous_detection']}; {f['snps_vs_7pet']} SNPs vs 2010EL-1786).")
     c = f
-    return (f"CLUSTER: {c['n']} related toxigenic O1 samples "
-            f"{c['date_from']}..{c['date_to']} "
-            f"({c['snps_min']}-{c['snps_max']} SNPs vs 2010EL-1786): "
-            f"{', '.join(c['accessions'])}.")
+    msg = (f"CLUSTER: {c['n']} related toxigenic O1 samples "
+           f"{c['date_from']}..{c['date_to']} "
+           f"({c['snps_min']}-{c['snps_max']} SNPs vs 2010EL-1786): "
+           f"{', '.join(c['accessions'])}.")
+    if c.get("pairwise_diameter") is not None:
+        ver = "confirmed" if c.get("pairwise_confirmed") else "MIXED"
+        msg += f" True pairwise diameter {c['pairwise_diameter']} SNPs ({ver})."
+    if c.get("missing_consensus"):
+        msg += f" No consensus for: {', '.join(c['missing_consensus'])}."
+    return msg
+
+
+def confirm_clusters_with_consensus(clusters, consensus_dir, snp_tol):
+    """Annotate R2 clusters with true pairwise distances (Phase 4).
+
+    consensus_dir: directory of {ACC}.fasta[.gz] files (e.g. downloaded
+    from r2://consensus/). Members without a consensus are listed under
+    missing_consensus; confirmation annotates, never gates, the alert.
+    """
+    from pathlib import Path as _Path
+    import pairwise as _pw
+    d = _Path(consensus_dir)
+    for c in clusters:
+        seqs = {}
+        for acc in c["accessions"]:
+            for ext in (".fasta", ".fasta.gz", ".fa", ".fa.gz"):
+                p = d / f"{acc}{ext}"
+                if p.exists():
+                    try:
+                        seqs[acc] = _pw.load_consensus(p)
+                    except Exception as e:  # noqa: BLE001 - one bad file
+                        print(f"warning: could not load {p}: {e}")
+                    break
+        conf = _pw.confirm_cluster(c["accessions"], seqs, snp_tol=snp_tol)
+        # JSON-safe keys for the alert payload.
+        c["pairwise_snps"] = {f"{a}|{b}": v
+                              for (a, b), v in conf["pairwise_snps"].items()}
+        c["pairwise_compared"] = {f"{a}|{b}": v
+                                  for (a, b), v in conf["pairwise_compared"].items()}
+        c["pairwise_diameter"] = conf["pairwise_diameter"]
+        c["pairwise_confirmed"] = conf["pairwise_confirmed"]
+        c["missing_consensus"] = conf["missing_consensus"]
+    return clusters
 
 
 def main():
@@ -276,6 +315,13 @@ def main():
     ap.add_argument("--day-tol", type=int, default=DEFAULT_DAY_TOL)
     ap.add_argument("--dry-run", action="store_true",
                     help="evaluate and print, do not write alerts or notify")
+    ap.add_argument("--consensus-dir", default=None,
+                    help="directory of {ACC}.fasta[.gz] consensuses for Phase 4 "
+                         "true-distance confirmation of R2 clusters")
+    ap.add_argument("--cluster-members-out", default=None,
+                    help="write the union of R2 cluster member accessions "
+                         "(one per line) and exit before alerting -- used by "
+                         "the workflow to fetch only needed consensuses")
     args = ap.parse_args()
 
     rows = fetch_rows()
@@ -283,6 +329,16 @@ def main():
     rec, skipped_r = detect_recurrence(rows, n_years=args.quiet_years)
     clusters, skipped_c = detect_clusters(rows, snp_tol=args.snp_tol,
                                          day_tol=args.day_tol)
+    if args.cluster_members_out:
+        members = sorted({a for c in clusters for a in c["accessions"]})
+        with open(args.cluster_members_out, "w") as f:
+            f.write("\n".join(members) + ("\n" if members else ""))
+        print(f"cluster members: {len(members)} -> {args.cluster_members_out}")
+        return
+    if args.consensus_dir and clusters:
+        confirm_clusters_with_consensus(clusters, args.consensus_dir,
+                                        snp_tol=args.snp_tol)
+        print(f"pairwise confirmation over {args.consensus_dir}")
     print(f"skipped undated: {max(skipped_r, skipped_c)}")
     findings = ([rec] if rec else []) + clusters
     if not findings:
