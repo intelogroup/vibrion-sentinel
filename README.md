@@ -316,6 +316,99 @@ writing plaintext.
 - **KMS integration** for the KEK (documented follow-up; env-held for now).
 - Cross-org anything — there is no cross-org; that's the point.
 
+## Phase 3: report product + portal (`service/` + `sql/`)
+
+Phase 3 turns completed jobs into customer-facing **genomic surveillance
+reports** and gives humans a way in: password accounts, sessions, and a
+minimal read-only portal. The RUO framing is load-bearing, not decorative.
+
+### Reports (`GET /jobs/{id}/report`, `GET /jobs/{id}/report.pdf`)
+
+Rendered from `report.json` v0.2.0 (`service/app/reports/`), one Jinja2
+template + per-language string catalogs (`en`/`fr`/`ht`) — not three
+duplicated templates.
+
+- **Header on every rendering:** sample/org/uploaded/completed dates,
+  pipeline version, platform, basecaller, tool+database versions — and the
+  RUO label, verbatim: *"For Research Use Only. Not for use in diagnostic
+  procedures."* (header **and** footer), plus the extended surveillance
+  disclaimer.
+- **QC verdict is first and loud.** A QC-fail greys out every result section
+  behind a *"results are not interpretable"* banner — QC-fail is a *result*,
+  not an error; it never retries.
+- **AMR gene table** is gene detected/not detected only, with the gene-only
+  disclaimer. Never a susceptibility claim.
+- **Languages:** `?lang=en|fr|ht` (default `en`). Non-English strings carry a
+  visible `TRANSLATOR-REVIEW` marker + a review banner: they are linguist
+  drafts, not verified translations. CI greps templates/i18n for banned
+  claim words (`service/tests/banned_phrases.txt`; mandated RUO/disclaimer
+  text is stripped first) — a hit fails the build.
+- PDF is rendered with WeasyPrint from the same HTML (`render_pdf`); the
+  Dockerfile's `service` stage installs its Pango/Cairo system deps.
+- `GET /jobs/{id}/tree`: redirects to the configured Auspice instance
+  (`AUSPICE_BASE_URL`, documented follow-up — URL stub only for now).
+- Report endpoints accept the **API key OR the session cookie** (dashboard
+  links must work for humans in browsers); cross-org still 404.
+
+### Worker hardening
+
+- `WORKER_CONCURRENCY` (default 2): the poll loop runs N claim threads;
+  `claim_next_job` is atomic so two workers never double-claim (proven by
+  test: 2 threads × 3 jobs, each claimed exactly once).
+- `JOB_TIMEOUT_HOURS` (default 6): runaway batches are killed
+  (`JobTimeoutError`) → job `failed` with a timeout reason.
+- **Retry discipline:** infrastructure errors (R2/download failures) retry at
+  most 3× with backoff (`running→queued`, `retry_count`), then fail for
+  good. Pipeline errors (non-zero exit) **never** retry. QC-fail is a result.
+  `POST /jobs/{id}/retry` stays the human override.
+- `service/app/batch.py`: `BatchBackend` interface + `LocalBackend` (current
+  behavior). No cloud backend — that's the documented handoff.
+
+### Human auth + portal
+
+Password accounts (argon2id hashing; chosen over magic-link for simpler
+ops), opaque session tokens (sha256 at rest, 30-day expiry, HttpOnly cookie
+`sentinel_session`; revoked on password change and logout), and
+`org_members(user_id, org_id, role)` reusing the admin/member/viewer roles.
+**API keys keep working unchanged** — the service stays machine-to-machine
+first; the portal is additive.
+
+- `POST /auth/signup` (creates a personal org + admin membership + one admin
+  API key, returned once), `POST /auth/login`, `POST /auth/logout`,
+  `GET /auth/me`, `POST /auth/change-password`,
+  `POST /org/invites` (admin; single-use token, 7-day expiry),
+  `POST /auth/accept-invite`.
+- `/dashboard`: server-rendered, minimal, read-only except retry — org job
+  list with status, QC verdict, HTML/PDF/Auspice links, retry button.
+  `/login`, `/signup` pages included.
+
+### New environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `WORKER_CONCURRENCY` | `2` | claim threads in the worker poll loop |
+| `JOB_TIMEOUT_HOURS` | `6` | wall-clock kill for runaway batches |
+| `AUSPICE_BASE_URL` | — | when set, `/jobs/{id}/tree` redirects there |
+| `SESSION_COOKIE_SECURE` | `false` | set `true` behind HTTPS in production |
+
+### New SQL files (run once each, in order)
+
+`sql/users.sql`, `sql/user_sessions.sql`, `sql/org_members.sql`,
+`sql/org_invites.sql`, `sql/migrate_004_retry_transition.sql`
+(`running→queued` for the bounded infra retry; `retry_count` column).
+
+### What Phase 3 does NOT build (handoffs)
+
+- **Cloud batch backend** (AWS Batch/Spot autoscaling) — `batch.py` has the
+  interface; only `LocalBackend` ships.
+- **Auspice tree rendering** — `/tree` is a link-out stub until the tree
+  pipeline lands.
+- **SSO/OIDC** — password auth is the deliberate v1; magic-link/SSO is a
+  follow-up if ops need it.
+- **KMS for the KEK** — still env-held (Phase 2 handoff, unchanged).
+- **Verified FR/HT translations** — marked `TRANSLATOR-REVIEW`; needs a
+  native-speaker pass before any customer sees them unmarked.
+
 ## Roadmap
 
 - **Strain database** — curated Postgres/PostgREST store: every Haitian/Caribbean isolate with collection date, department, clinical vs environmental origin, lineage, AMR, toxin, QC flags

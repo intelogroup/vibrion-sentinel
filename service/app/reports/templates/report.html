@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8">
+<title>{{ s.title }} — {{ job_id }}</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         margin: 2rem auto; max-width: 860px; color: #1a1a1a; line-height: 1.5; }
+  .ruo { background: #fff3cd; border: 2px solid #b58900; padding: 0.75rem 1rem;
+         font-weight: 700; margin-bottom: 1rem; }
+  .review-banner { background: #e8f0fe; border: 1px solid #1a73e8; padding: 0.6rem 1rem;
+                   margin-bottom: 1rem; font-size: 0.9rem; }
+  .disclaimer { background: #f6f6f6; border-left: 4px solid #888; padding: 0.75rem 1rem;
+                margin: 1rem 0; font-size: 0.92rem; }
+  .qc { border: 3px solid; padding: 1rem; margin: 1.25rem 0; }
+  .qc.pass { border-color: #1e7e34; background: #eaf7ee; }
+  .qc.fail { border-color: #b00020; background: #fdecea; }
+  .qc h2 { margin: 0 0 0.5rem 0; font-size: 1.6rem; }
+  .qc-fail-zone { filter: grayscale(1); opacity: 0.55; }
+  .not-interpretable { background: #b00020; color: #fff; font-weight: 700;
+                       padding: 0.5rem 1rem; margin-bottom: 1rem; }
+  table { border-collapse: collapse; width: 100%; margin: 0.75rem 0; }
+  th, td { border: 1px solid #ccc; padding: 0.4rem 0.6rem; text-align: left;
+           font-size: 0.92rem; }
+  th { background: #f0f0f0; }
+  .meta td:first-child { font-weight: 600; width: 38%; }
+  h1 { font-size: 1.7rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; margin-top: 1.75rem; border-bottom: 1px solid #ddd;
+       padding-bottom: 0.25rem; }
+  .footer { margin-top: 2rem; font-size: 0.85rem; color: #555;
+            border-top: 1px solid #ddd; padding-top: 0.75rem; }
+  .amr-note { font-size: 0.9rem; font-style: italic; margin-top: 0.5rem; }
+  @media print { body { margin: 1cm; } .qc-fail-zone { filter: grayscale(1); } }
+</style>
+</head>
+<body>
+
+<div class="ruo">{{ s.ruo_banner }}</div>
+
+{% if review_banner %}
+<div class="review-banner">{{ review_banner }}</div>
+{% endif %}
+
+<h1>{{ s.title }}</h1>
+
+<div class="disclaimer">{{ disclaimer }}</div>
+
+<div class="qc {{ 'pass' if qc_pass else 'fail' }}">
+  <h2>{{ s.qc_verdict }}: {{ s.qc_pass if qc_pass else s.qc_fail }}</h2>
+  {% if qc_reasons %}
+  <div><strong>{{ s.qc_reasons }}:</strong>
+    <ul>
+    {% for r in qc_reasons %}
+      <li>{{ r }}</li>
+    {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</div>
+
+{% if not qc_pass %}
+<div class="not-interpretable">{{ s.not_interpretable }}</div>
+<div class="qc-fail-zone">
+{% endif %}
+
+<h2>{{ s.section_sample }}</h2>
+<table class="meta">
+  <tr><td>{{ s.label_job }}</td><td>{{ job_id }}</td></tr>
+  <tr><td>{{ s.label_org }}</td><td>{{ org_id }}</td></tr>
+  <tr><td>{{ s.label_uploaded }}</td><td>{{ uploaded_at }}</td></tr>
+  <tr><td>{{ s.label_completed }}</td><td>{{ completed_at }}</td></tr>
+  <tr><td>{{ s.label_pipeline }}</td><td>{{ pipeline_version }}</td></tr>
+  <tr><td>{{ s.label_reference }}</td><td>{{ reference }}</td></tr>
+  <tr><td>{{ s.label_platform }}</td><td>{{ platform }}</td></tr>
+  <tr><td>{{ s.label_basecaller }}</td><td>{{ basecaller_model }}</td></tr>
+</table>
+
+<h2>{{ s.section_species }}</h2>
+<table class="meta">
+  <tr><td>{{ s.label_species }}</td><td>Vibrio cholerae</td></tr>
+  <tr><td>{{ s.label_species_reads }}</td><td>{{ v_cholerae_reads }}</td></tr>
+  <tr><td>{{ s.label_species_fraction }}</td><td>{{ v_cholerae_fraction }}</td></tr>
+  <tr><td>{{ s.label_mean_depth }}</td><td>{{ mean_depth }}</td></tr>
+  <tr><td>{{ s.label_breadth }}</td><td>{{ breadth_pct }}</td></tr>
+</table>
+
+<h2>{{ s.section_lineage }}</h2>
+<table class="meta">
+  <tr><td>{{ s.label_snps }}</td><td>{{ snps_vs_7pet }}</td></tr>
+  <tr><td>{{ s.label_mlst }}</td><td>{{ mlst_st }}</td></tr>
+  <tr><td>{{ s.label_vibecheck }}</td><td>{{ vibecheck_lineage }}</td></tr>
+</table>
+
+<h2>{{ s.section_loci }}</h2>
+<table>
+  <tr><th>{{ s.locus }}</th><th>{{ s.call }}</th></tr>
+  {% for locus, call in loci %}
+  <tr><td>{{ locus }}</td><td>{{ call }}</td></tr>
+  {% endfor %}
+</table>
+
+<h2>{{ s.section_amr }}</h2>
+<table>
+  <tr><th>{{ s.gene }}</th><th>{{ s.call }}</th></tr>
+  {% for gene, call in amr_genes %}
+  <tr><td>{{ gene }}</td><td>{{ call }}</td></tr>
+  {% endfor %}
+</table>
+<p class="amr-note">{{ s.amr_disclaimer }}</p>
+
+<h2>{{ s.section_provenance }}</h2>
+<table class="meta">
+  <tr><td>{{ s.label_tool_versions }}</td><td>{{ tool_versions }}</td></tr>
+</table>
+
+{% if not qc_pass %}
+</div><!-- /qc-fail-zone -->
+{% endif %}
+
+<div class="footer">
+  <div class="ruo">{{ s.ruo_banner }}</div>
+  <div class="disclaimer">{{ disclaimer }}</div>
+  <p>{{ s.generated_at }}: {{ generated_at }} · {{ s.footer_note }}</p>
+</div>
+
+</body>
+</html>

@@ -91,6 +91,19 @@ FROM runtime AS service
 
 USER root
 
+# WeasyPrint (Phase 3 PDF reports) renders via Pango/Cairo — system
+# libraries the conda env does not provide. Installed here, before the pip
+# deps, so the image can render /jobs/{id}/report.pdf.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpango-1.0-0 \
+        libpangoft2-1.0-0 \
+        libharfbuzz-subset0 \
+        libjpeg-dev \
+        libopenjp2-7-dev \
+        libffi-dev \
+        fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 # Service Python deps (FastAPI app + worker). The vibrion conda env's pip is
 # used so there is one Python per image.
 COPY service/requirements.txt /app/service/requirements.txt

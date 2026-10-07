@@ -1,14 +1,19 @@
-"""Phase 1 worker: queued ingest jobs in, pipeline reports out.
+"""Phase 3 worker: queued ingest jobs in, pipeline reports out.
 
 Long-running process. Each iteration claims one `queued` job atomically
 (POST /rest/v1/rpc/claim_next_ingest_job -> FOR UPDATE SKIP LOCKED, so
 multiple workers are safe), downloads the FASTQ from R2, writes a
 pipeline config.yaml using the EXISTING schema
-(workflow/sentinel_lite/Snakefile), runs snakemake, and stores the
-report.json verbatim on the job row + mirrored into sentinel_runs.
+(workflow/sentinel_lite/Snakefile), runs snakemake through a BatchBackend,
+and stores the report.json verbatim on the job row + mirrored into
+sentinel_runs.
 
-Failed jobs stay failed for inspection; re-queue is the explicit
-POST /jobs/{id}/retry endpoint. Never retry blindly.
+Retry discipline (spec §2):
+- INFRA errors (download/R2 failures) retry, max 3 with backoff, then fail.
+- PIPELINE errors (snakemake exit != 0) never retry.
+- QC-fail is a RESULT (job done), not an error.
+- Timeouts kill the runaway and mark the job failed/timeout.
+- POST /jobs/{id}/retry stays the explicit human override.
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -24,6 +30,13 @@ from typing import Any, Callable
 
 import yaml
 
+from service.app.batch import (
+    BatchBackend,
+    InfraError,
+    JobTimeoutError,
+    LocalBackend,
+    run_to_outcome,
+)
 from service.app.config import Settings
 from service.app.crypto import DecryptionError, EncryptedStorage, KeyProvider
 from service.app.db import JobDB, SupabaseRestDB
@@ -31,6 +44,10 @@ from service.app.storage import R2Storage, Storage
 
 # Tail of the snakemake log kept in status_reason on failure.
 LOG_TAIL_CHARS = 4000
+
+# Infra errors retry this many times (with backoff) before the job fails.
+# Pipeline errors never retry; QC-fail is a result, not an error.
+MAX_INFRA_RETRIES = 3
 
 
 def build_config(job: dict[str, Any], settings: Settings, local_fastq: str, outdir: str) -> dict[str, Any]:
@@ -64,16 +81,10 @@ def build_snakemake_cmd(config_path: str, snakefile: str, cores: int) -> list[st
 
 
 def default_run_pipeline(workdir: str, cmd: list[str]) -> tuple[int, str]:
-    """Run snakemake, capturing combined output. Returns (returncode, log)."""
-    proc = subprocess.run(
-        cmd,
-        cwd=workdir,
-        capture_output=True,
-        text=True,
-        timeout=6 * 3600,  # 6h wall clock; a stuck job should fail, not hang forever
-    )
-    log = f"$ {' '.join(cmd)}\n{proc.stdout}\n{proc.stderr}"
-    return proc.returncode, log
+    """Legacy 2-arg runner (kept for tests). Production uses LocalBackend
+    with the configured JOB_TIMEOUT_HOURS."""
+    backend = LocalBackend()
+    return backend.run(workdir, cmd, timeout_hours=6)
 
 
 def mirror_row(job: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
@@ -110,14 +121,47 @@ def mirror_row(job: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
 RunPipeline = Callable[[str, list[str]], tuple[int, str]]
 
 
+class _FnBackend(BatchBackend):
+    """Adapter for the legacy 2-arg run_pipeline callable (tests)."""
+
+    def __init__(self, fn: RunPipeline):
+        self._fn = fn
+
+    def run(
+        self, workdir: str, cmd: list[str], timeout_hours: float
+    ) -> tuple[int, str]:
+        return self._fn(workdir, cmd)
+
+
+def _infra_retry(db: JobDB, job: dict[str, Any], reason: str) -> None:
+    """Bounded retry for infra errors. Pipeline errors never come here."""
+    n = int(job.get("retry_count") or 0)
+    running = {**job, "status": "running"}
+    if n < MAX_INFRA_RETRIES:
+        db.update_job(job["id"], {"retry_count": n + 1})
+        db.transition(
+            running,
+            "queued",
+            reason=f"infra error, retry {n + 1}/{MAX_INFRA_RETRIES}: {reason}",
+        )
+    else:
+        db.transition(
+            running,
+            "failed",
+            reason=f"infra error, {MAX_INFRA_RETRIES} retries exhausted: {reason}",
+        )
+
+
 def process_one_job(
     db: JobDB,
     storage: Storage,
     settings: Settings,
     run_pipeline: RunPipeline | None = None,
+    backend: BatchBackend | None = None,
 ) -> bool:
     """Claim and process a single queued job. Returns True if one was processed."""
-    run_pipeline = run_pipeline or default_run_pipeline
+    if backend is None:
+        backend = _FnBackend(run_pipeline) if run_pipeline else LocalBackend()
     job = db.claim_next_job()
     if job is None:
         return False
@@ -132,7 +176,12 @@ def process_one_job(
             # sidecar or GCM tag failure raises DecryptionError (fail closed).
             storage.download_to_file(job["r2_key"], local_fastq)
         except DecryptionError as e:
+            # Data corruption, not transient: fail, never retry.
             db.transition(job, "failed", reason=f"decryption failed: {e}")
+            return True
+        except Exception as e:
+            # Download / R2 failure: infra error, bounded retry.
+            _infra_retry(db, job, f"download failed: {e}")
             return True
 
         # Optional integrity re-check at download time.
@@ -155,9 +204,24 @@ def process_one_job(
             yaml.safe_dump(cfg, f)
 
         cmd = build_snakemake_cmd(cfg_path, settings.snakefile, settings.snakemake_cores)
-        rc, log = run_pipeline(str(workdir), cmd)
-        if rc != 0:
+        outcome, rc, log = run_to_outcome(
+            backend, str(workdir), cmd, settings.job_timeout_hours
+        )
+        if outcome == "ok":
+            pass  # fall through to report handling below
+        elif outcome == "pipeline_error":
+            # The pipeline failed on its own terms: never retry.
             db.transition(job, "failed", reason=log[-LOG_TAIL_CHARS:])
+            return True
+        elif outcome == "timeout":
+            db.transition(
+                job, "failed",
+                reason=f"timeout after {settings.job_timeout_hours}h wall clock; "
+                       "runaway process killed",
+            )
+            return True
+        else:  # infra_error
+            _infra_retry(db, job, log)
             return True
 
         report_path = os.path.join(outdir, "report.json")
@@ -179,6 +243,21 @@ def process_one_job(
         shutil.rmtree(workdir, ignore_errors=True)
 
 
+def _poll_loop(
+    db: JobDB,
+    storage: Storage,
+    settings: Settings,
+    backend: BatchBackend,
+) -> None:
+    while True:
+        try:
+            if not process_one_job(db, storage, settings, backend=backend):
+                time.sleep(settings.worker_poll_interval)
+        except Exception:
+            traceback.print_exc()
+            time.sleep(settings.worker_poll_interval)
+
+
 def main() -> None:
     settings = Settings()
     settings.require_db()
@@ -194,15 +273,27 @@ def main() -> None:
         ),
         KeyProvider(db, kek),
     )
+    backend: BatchBackend = LocalBackend()
     os.makedirs(settings.worker_workdir, exist_ok=True)
-    print(f"sentinel ingest worker: polling every {settings.worker_poll_interval}s", flush=True)
-    while True:
-        try:
-            if not process_one_job(db, storage, settings):
-                time.sleep(settings.worker_poll_interval)
-        except Exception:
-            traceback.print_exc()
-            time.sleep(settings.worker_poll_interval)
+    n = max(int(settings.worker_concurrency), 1)
+    print(
+        f"sentinel ingest worker: {n} worker(s), "
+        f"polling every {settings.worker_poll_interval}s",
+        flush=True,
+    )
+    if n == 1:
+        _poll_loop(db, storage, settings, backend)
+        return
+    threads = [
+        threading.Thread(
+            target=_poll_loop, args=(db, storage, settings, backend), daemon=True
+        )
+        for _ in range(n)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
 
 
 if __name__ == "__main__":

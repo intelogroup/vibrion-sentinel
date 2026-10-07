@@ -1,0 +1,46 @@
+# Banned phrases for the report-template CI check.
+#
+# From sentinel-liability-guardrails.md §2.1 (forbidden claim words) and the
+# Phase 3 spec. These must NEVER appear in customer-facing report templates,
+# the i18n string catalog, or the dashboard templates — in any of the three
+# languages. Matching is case-insensitive, word-boundary aware.
+#
+# EXEMPTIONS (handled in code, not here): the verbatim RUO label
+# ("For Research Use Only. Not for use in diagnostic procedures.") and the
+# three extended surveillance disclaimers are mandated text; the test strips
+# them before grepping.
+#
+# English
+resistant to
+treat with
+treatment with
+susceptible
+diagnose
+diagnostic
+patient
+prescribe
+clinical
+actionable
+sensitivity
+specificity
+# French
+résistant
+traiter
+traitement
+prescrire
+clinique
+diagnostique
+diagnostiquer
+exploitable
+sensibilité
+spécificité
+# Haitian Creole
+dyagnostik
+dyagnostike
+pasyan
+tretman
+trete
+preskri
+klinik
+sansiblite
+espesifisite

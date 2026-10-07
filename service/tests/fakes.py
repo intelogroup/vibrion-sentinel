@@ -8,6 +8,7 @@ JobDB.transition), so tests prove the state machine, not just the mocks.
 from __future__ import annotations
 
 import copy
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -28,6 +29,13 @@ class FakeDB(JobDB):
         self.data_keys: dict[str, dict[str, Any]] = {}  # org_id -> current row
         self.data_key_versions: dict[tuple[str, int], dict[str, Any]] = {}
         self.audit_rows: list[dict[str, Any]] = []
+        self.users: dict[str, dict[str, Any]] = {}          # id -> row
+        self.users_by_email: dict[str, dict[str, Any]] = {}  # email -> row
+        self.sessions: dict[str, dict[str, Any]] = {}       # token_hash -> row
+        self.members: dict[tuple[str, str], dict[str, Any]] = {}  # (user_id, org_id) -> row
+        self.invites: dict[str, dict[str, Any]] = {}       # token_hash -> row
+        self.invites_by_id: dict[str, dict[str, Any]] = {}
+        self._lock = threading.Lock()
 
     # -- jobs -----------------------------------------------------------
     def create_job(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -68,14 +76,17 @@ class FakeDB(JobDB):
         return copy.deepcopy(job)
 
     def claim_next_job(self) -> Optional[dict[str, Any]]:
-        queued = [j for j in self.jobs.values() if j["status"] == "queued"]
-        if not queued:
-            return None
-        queued.sort(key=lambda j: j["created_at"])
-        job = queued[0]
-        # Same legal move the SQL claim function makes: queued -> running.
-        self.transition(job, "running")
-        return copy.deepcopy(self.jobs[job["id"]])
+        # Lock: models the atomic FOR UPDATE SKIP LOCKED claim so the
+        # double-claim test is meaningful.
+        with self._lock:
+            queued = [j for j in self.jobs.values() if j["status"] == "queued"]
+            if not queued:
+                return None
+            queued.sort(key=lambda j: j["created_at"])
+            job = queued[0]
+            # Same legal move the SQL claim function makes: queued -> running.
+            self.transition(job, "running")
+            return copy.deepcopy(self.jobs[job["id"]])
 
     # -- api keys --------------------------------------------------------
     def lookup_key(self, key_hash: str) -> Optional[dict[str, Any]]:
@@ -199,6 +210,123 @@ class FakeDB(JobDB):
         rows = [r for r in self.audit_rows if r["org_id"] == org_id]
         rows.sort(key=lambda r: r["at"], reverse=True)
         return copy.deepcopy(rows[offset : offset + limit])
+
+    # -- human auth (Phase 3) ------------------------------------------------
+    def create_user(self, email: str, password_hash: str) -> dict[str, Any]:
+        if email in self.users_by_email:
+            raise ValueError("email already registered")
+        row = {
+            "id": str(uuid.uuid4()),
+            "email": email,
+            "password_hash": password_hash,
+            "created_at": _now(),
+        }
+        self.users[row["id"]] = row
+        self.users_by_email[email] = row
+        return copy.deepcopy(row)
+
+    def get_user(self, user_id: str) -> Optional[dict[str, Any]]:
+        row = self.users.get(user_id)
+        return copy.deepcopy(row) if row else None
+
+    def get_user_by_email(self, email: str) -> Optional[dict[str, Any]]:
+        row = self.users_by_email.get(email)
+        return copy.deepcopy(row) if row else None
+
+    def update_user_password(self, user_id: str, password_hash: str) -> None:
+        self.users[user_id]["password_hash"] = password_hash
+
+    def update_user_last_login(self, user_id: str) -> None:
+        self.users[user_id]["last_login_at"] = _now()
+
+    def create_session(
+        self, user_id: str, token_hash: str, expires_at: str
+    ) -> dict[str, Any]:
+        row = {
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "token_hash": token_hash,
+            "created_at": _now(),
+            "expires_at": expires_at,
+            "revoked_at": None,
+        }
+        self.sessions[token_hash] = row
+        return copy.deepcopy(row)
+
+    def get_session(self, token_hash: str) -> Optional[dict[str, Any]]:
+        row = self.sessions.get(token_hash)
+        return copy.deepcopy(row) if row else None
+
+    def revoke_session(self, token_hash: str) -> None:
+        row = self.sessions.get(token_hash)
+        if row:
+            row["revoked_at"] = _now()
+
+    def revoke_all_sessions(self, user_id: str) -> int:
+        n = 0
+        for row in self.sessions.values():
+            if row["user_id"] == user_id and not row.get("revoked_at"):
+                row["revoked_at"] = _now()
+                n += 1
+        return n
+
+    def add_org_member(
+        self, user_id: str, org_id: str, role: str
+    ) -> dict[str, Any]:
+        row = {
+            "user_id": user_id,
+            "org_id": org_id,
+            "role": role,
+            "created_at": _now(),
+        }
+        self.members[(user_id, org_id)] = row
+        return copy.deepcopy(row)
+
+    def get_org_member(
+        self, user_id: str, org_id: str
+    ) -> Optional[dict[str, Any]]:
+        row = self.members.get((user_id, org_id))
+        return copy.deepcopy(row) if row else None
+
+    def get_org_memberships(self, user_id: str) -> list[dict[str, Any]]:
+        return copy.deepcopy(
+            [m for (uid, _), m in self.members.items() if uid == user_id]
+        )
+
+    def create_invite(
+        self,
+        org_id: str,
+        email: str,
+        role: str,
+        token_hash: str,
+        expires_at: str,
+    ) -> dict[str, Any]:
+        row = {
+            "id": str(uuid.uuid4()),
+            "org_id": org_id,
+            "email": email,
+            "role": role,
+            "token_hash": token_hash,
+            "created_at": _now(),
+            "expires_at": expires_at,
+            "used_at": None,
+        }
+        self.invites[token_hash] = row
+        self.invites_by_id[row["id"]] = row
+        return copy.deepcopy(row)
+
+    def get_invite(self, token_hash: str) -> Optional[dict[str, Any]]:
+        row = self.invites.get(token_hash)
+        return copy.deepcopy(row) if row else None
+
+    def use_invite(self, invite_id: str) -> None:
+        row = self.invites_by_id.get(invite_id)
+        if row:
+            row["used_at"] = _now()
+
+    def get_job_any(self, job_id: str) -> Optional[dict[str, Any]]:
+        job = self.jobs.get(job_id)
+        return copy.deepcopy(job) if job else None
 
     # -- sentinel_runs mirror ---------------------------------------------
     def mirror_sentinel_run(self, row: dict[str, Any]) -> None:
