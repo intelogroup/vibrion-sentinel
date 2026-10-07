@@ -1,0 +1,117 @@
+# Phase 5B.1/5B.2/5B.9 — curated virulence-allele table for the lite pipeline.
+#
+# Every coordinate below was DERIVED 2026-10-07 from the NCBI GenBank record
+# CP003069.1 (V. cholerae O1 2010EL-1786), never hand-guessed:
+#   - ctxB: BED CDS row 1041237-1041612 (0-based, minus strand) translated to a
+#     clean 124-aa precursor + stop; positions 20/39/68 carry N/H/T = the
+#     ctxB7 signature, which cross-validates the literature numbering as the
+#     124-aa precursor (incl. 21-aa signal peptide).
+#   - tcpA: BED CDS row 367949-368624 (0-based, plus strand) translates clean;
+#     codon 89 = AGT (S), consistent with 2010EL-1786 being Wave 3.
+#   - rtxA: BED CDS row 1027142-1040744 (0-based, plus strand) translates clean;
+#     codon 4534 = TGA (stop), consistent with the Wave 3 truncation.
+#   - hapR: NOT where phenotypic_prediction.py said (CP003069.1:1086835-1087515
+#     contains no hapR-like ORF — that script's coordinates are wrong and must
+#     not be used). Located by homology: 609-bp CDS on the minus strand,
+#     1-based 3023607-3024215, translating to a 203-aa protein IDENTICAL to
+#     C6706 HapR (NCBI protein QPC53839.1). Annotated as Vch1786_I2895
+#     (TetR/AcrR family transcriptional regulator, 1-based 3023604-3024215).
+#   - vexB: annotated Vch1786_I2444 is a different RND transporter (901/1036 aa
+#     differ from VexB). True vexB located by homology: 3108-bp CDS on the
+#     minus strand, 1-based 2584974-2588081, translating to a 1036-aa protein
+#     IDENTICAL to C6706 VexB (NCBI protein QPC53479.1).
+#
+# Conventions:
+#   - positions: 1-based, listed in mRNA 5'->3' order (minus strand = genomic
+#     descending). call_alleles complements each base when strand == "-".
+#   - ref_aa: amino acid encoded by 2010EL-1786 itself.
+#   - interpretations: observed_aa -> {allele, citation}. Anything else -> "other".
+#   - indeterminate (never guessed): any site N in the consensus or below
+#     depth/QUAL floors.
+#
+# RUO rule: reports state "sequence matches the published {allele} ({citation})"
+# as an observation. Never a virulence, transmissibility, or clinical claim.
+
+reference: "2010EL-1786 (CP003069.1/CP003070.1)"
+derived: "2026-10-07, BioPython translation cross-checks vs NCBI GenBank"
+
+codons:
+  - id: ctxB_20
+    gene: ctxB
+    chrom: CP003069.1
+    strand: "-"
+    positions: [1041555, 1041554, 1041553]
+    ref_aa: N
+    interpretations:
+      N: {allele: ctxB7, citation: "Weng et al., PLOS Pathog 2026"}
+      H: {allele: classical-like, citation: "Safa et al., Emerg Infect Dis 2010 (ctxB genotyping)"}
+    derivation: "ctxB CDS 0-based 1041237-1041612 minus strand; codon 20 = 1-based 1041553-1041555; genomic ATT -> mRNA AAT = N; 2010EL-1786 carries ctxB7"
+  - id: ctxB_39
+    gene: ctxB
+    chrom: CP003069.1
+    strand: "-"
+    positions: [1041498, 1041497, 1041496]
+    ref_aa: H
+    interpretations:
+      H: {allele: ctxB7, citation: "Weng et al., PLOS Pathog 2026"}
+      Y: {allele: classical-like, citation: "Safa et al., Emerg Infect Dis 2010 (ctxB genotyping)"}
+    derivation: "codon 39 = 1-based 1041496-1041498; genomic GTA -> mRNA CAT = H; ctxB7"
+  - id: ctxB_68
+    gene: ctxB
+    chrom: CP003069.1
+    strand: "-"
+    positions: [1041411, 1041410, 1041409]
+    ref_aa: T
+    interpretations:
+      T: {allele: ctxB7, citation: "Weng et al., PLOS Pathog 2026"}
+      I: {allele: classical-like, citation: "Safa et al., Emerg Infect Dis 2010 (ctxB genotyping)"}
+    derivation: "codon 68 = 1-based 1041409-1041411; genomic AGT -> mRNA ACT = T; ctxB7"
+  - id: tcpA_89
+    gene: tcpA
+    chrom: CP003069.1
+    strand: "+"
+    positions: [368214, 368215, 368216]
+    ref_aa: S
+    interpretations:
+      S: {allele: Wave-3-like, citation: "Weng et al., PLOS Pathog 2026 (TcpA N89S)"}
+      N: {allele: pre-Wave-3-like, citation: "Weng et al., PLOS Pathog 2026 (TcpA N89S)"}
+    derivation: "tcpA CDS 0-based 367949-368624 plus strand; codon 89 = 1-based 368214-368216 = AGT = S"
+  - id: rtxA_4534
+    gene: rtxA
+    chrom: CP003069.1
+    strand: "+"
+    positions: [1040742, 1040743, 1040744]
+    ref_aa: "*"
+    interpretations:
+      "*": {allele: Wave-3-like (truncated, no functional MARTX), citation: "Weng et al., PLOS Pathog 2026 (rtxA W4534stop)"}
+      W: {allele: intact, citation: "Weng et al., PLOS Pathog 2026 (rtxA W4534stop)"}
+    derivation: "rtxA CDS 0-based 1027142-1040744 plus strand, 4534 codons; codon 4534 = 1-based 1040742-1040744 = TGA = stop; 2010EL-1786 carries the truncation"
+
+# Gene-level rollups: all codons of the gene must agree for a named allele.
+gene_rollups:
+  ctxB:
+    codons: [ctxB_20, ctxB_39, ctxB_68]
+    all_ctxB7: ctxB7
+    all_classical-like: classical-like
+    citation: "Weng et al., PLOS Pathog 2026; Safa et al., Emerg Infect Dis 2010"
+
+# CDS scans: no curated LoF site list exists, so these report OBSERVED
+# variants in the span. Functional consequence is never assessed.
+cds_scans:
+  - id: hapR
+    chrom: CP003069.1
+    strand: "-"
+    span_1based: [3023607, 3024215]
+    note: "full-CDS coverage via loci BED row; VCF scan reports any variant in span; no curated LoF site list exists"
+    citation: "Nat Commun 2024 (luxO/hapR under positive selection); research gap: no systematic 2024+ hapR survey"
+  - id: vexB
+    chrom: CP003069.1
+    strand: "-"
+    span_1based: [2584974, 2588081]
+    note: "reports non-synonymous variant candidates; functional consequence not assessed"
+    citation: "Weng et al., PLOS Pathog 2026 (VexB couples MDR with hypervirulence)"
+
+# Explicitly parked: coordinates or variant definitions could not be verified.
+parked:
+  - id: wbeT_serotype
+    reason: "No curated Ogawa/Inaba-defining wbeT variant set verified against 2010EL-1786; the lite BED wbeT row has an unresolved 5' end (aln:VC_0258, 10bp unaligned). Barton et al., Nature 2026 documents wbeT disruption -> Inaba switches, but without per-variant coordinates."

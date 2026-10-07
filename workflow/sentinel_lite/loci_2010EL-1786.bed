@@ -12,6 +12,18 @@
 #     from this reference (e.g. O139 wbf cluster) cannot be detected here.
 #   - wbeT present does not give Ogawa vs Inaba (point mutations); gyrA/parC/parE
 #     present does not give QRDR resistance mutations. Allele calls are future work.
+#   - hapR (2026-10-07): the phenotypic_prediction.py coordinates
+#     (CP003069.1:1086835-1087515) were checked and contain NO hapR-like
+#     ORF -- do not use. True hapR located by homology: 609-bp CDS on the
+#     minus strand (1-based 3023607-3024215), translating to a 203-aa
+#     protein identical to C6706 HapR (NCBI protein QPC53839.1); annotated
+#     as Vch1786_I2895 (TetR/AcrR family transcriptional regulator).
+#   - vexB (2026-10-07): Vch1786_I0421 is a different RND transporter
+#     (901/1036 aa differ). True vexB located by homology: 3108-bp CDS on
+#     the minus strand (1-based 2584974-2588081), translating to a
+#     1036-aa protein identical to C6706 VexB (NCBI protein QPC53479.1);
+#     annotated as Vch1786_I2444 (conserved hypothetical protein).
+#     Weng et al., PLOS Pathog 2026: VexB couples MDR with hypervirulence.
 #   - hapR omitted: not annotated as a CDS in N16961 or 2010EL-1786, and
 #     presence/absence cannot detect its known loss-of-function alleles.
 #
@@ -43,3 +55,6 @@ CP003069.1	2687552	2688226	wbeT	.	+	aln:VC_0258(aligned span; 5' 10bp unaligned,
 CP003069.1	2688260	2689493	rfbV	.	-	ann
 # chr2
 CP003070.1	1010364	1012590	hlyA	.	+	aln:VC_A0219
+# quorum sensing / efflux (Phase 5B; homology-verified, see header)
+CP003069.1	3023603	3024215	hapR	.	-	ann:Vch1786_I2895(homology-verified)
+CP003069.1	2584973	2588081	vexB	.	-	homology:Vch1786_I2444

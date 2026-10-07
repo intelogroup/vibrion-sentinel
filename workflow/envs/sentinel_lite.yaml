@@ -13,6 +13,7 @@ dependencies:
   - seqkit>=2.5
   - sra-tools>=3.0  # fallback downloader when ENA has no FTP copy
   - pigz>=2.8
+  - pyyaml>=6.0  # report_lib parses alleles.yaml + mobile_elements.yaml
   # --- Phase 0: Nanopore branch (pinned; "latest" is not a version) ---
   - nanoplot=1.46.1
   - chopper=0.8.0  # maintained NanoFilt successor; Q>=9, length>=1000

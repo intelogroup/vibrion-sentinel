@@ -1,0 +1,21 @@
+# Phase 5B.3/5B.4 — mobile-element screen manifest (PLE islands, anti-phage
+# defense systems). EMPTY BY DEFAULT: the screen reports "not_screened" until
+# versioned reference sequences with verified provenance are added here.
+#
+# Provenance rule (hard): every ref_fasta must come from a published reference
+# sequence verified against its GenBank record (accession recorded below).
+# Never fabricate coordinates or sequences.
+#
+# Schema per element:
+#   - id: PLE11            # short id, used in report.json
+#     name: "PLE11 (ICP1 satellite)"
+#     ref_fasta: data/references/ple/PLE11.fasta
+#     accession: "..."      # GenBank accession of the source record
+#     citation: "Mathur et al., Nature 2026"
+#     breadth_present: 80  # optional overrides of the defaults
+#
+# Candidates awaiting verified refs: PLE1, PLE11, PLE2 (Mathur et al., Nature
+# 2026; Barton et al., Nature 2026); WonAB, GrwAB, Shedu/VcSduA, dDmABC, CBASS
+# (Adams et al., Nat Microbiol 2025).
+
+elements: []

@@ -211,7 +211,7 @@ VALID_PLATFORMS = ("illumina", "nanopore")
 VALID_TIERS = ("lite", "assembly")
 VALID_BASECALLERS = ("fast", "hac", "sup")
 
-PIPELINE_VERSION = "0.2.0"
+PIPELINE_VERSION = "0.3.0"  # 5B: alleles + ICE profile + mobile screens
 
 # Tiered QC gates (see evaluate_qc): provisional cutoffs, plus hard-fail floors.
 # Provisional defaults: FWD-AMR-RefLabCap (>=30x; >5% off-species contaminated),
@@ -442,3 +442,363 @@ def amrfinder_db_version(raw_version_output):
     software and database versions. 'unknown' when not found."""
     m = re.search(r"[Dd]atabase version:?\s*(\S+)", raw_version_output or "")
     return m.group(1) if m else "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Phase 5B: allele calling, ICE profiling, plasmid screening, mobile elements.
+# All functions are pure (paths in, plain data out) and unit-testable.
+# Global RUO rule: reports state sequence observations with citations, never
+# virulence, transmissibility, or clinical predictions.
+# ---------------------------------------------------------------------------
+
+import gzip as _gzip
+
+RUO_ALLELE_TEMPLATE = (
+    "Sequence-level observation: this sample's {feature} matches the published "
+    "{variant} ({citation}). This is an observation, not a prediction of "
+    "virulence, transmissibility, or clinical outcome."
+)
+
+_CODON_TABLE = {
+    "TTT": "F", "TTC": "F", "TTA": "L", "TTG": "L",
+    "TCT": "S", "TCC": "S", "TCA": "S", "TCG": "S",
+    "TAT": "Y", "TAC": "Y", "TAA": "*", "TAG": "*",
+    "TGT": "C", "TGC": "C", "TGA": "*", "TGG": "W",
+    "CTT": "L", "CTC": "L", "CTA": "L", "CTG": "L",
+    "CCT": "P", "CCC": "P", "CCA": "P", "CCG": "P",
+    "CAT": "H", "CAC": "H", "CAA": "Q", "CAG": "Q",
+    "CGT": "R", "CGC": "R", "CGA": "R", "CGG": "R",
+    "ATT": "I", "ATC": "I", "ATA": "I", "ATG": "M",
+    "ACT": "T", "ACC": "T", "ACA": "T", "ACG": "T",
+    "AAT": "N", "AAC": "N", "AAA": "K", "AAG": "K",
+    "AGT": "S", "AGC": "S", "AGA": "R", "AGG": "R",
+    "GTT": "V", "GTC": "V", "GTA": "V", "GTG": "V",
+    "GCT": "A", "GCC": "A", "GCA": "A", "GCG": "A",
+    "GAT": "D", "GAC": "D", "GAA": "E", "GAG": "E",
+    "GGT": "G", "GGC": "G", "GGA": "G", "GGG": "G",
+}
+
+_COMP = {"A": "T", "T": "A", "C": "G", "G": "C", "N": "N"}
+
+
+def load_alleles(path):
+    """Parse alleles.yaml. Returns the table dict; raises on missing keys so
+    a malformed table fails loudly instead of silently dropping alleles."""
+    import yaml
+    with open(path) as f:
+        table = yaml.safe_load(f)
+    for key in ("codons", "cds_scans"):
+        if key not in table or not table[key]:
+            raise ValueError(f"alleles table {path} missing '{key}'")
+    return table
+
+
+def load_mobile_elements(path):
+    """Parse mobile_elements.yaml. Returns the element list (possibly empty).
+    Raises on a malformed entry so a bad manifest fails loudly instead of
+    silently screening nothing."""
+    import yaml
+    with open(path) as f:
+        manifest = yaml.safe_load(f) or {}
+    elements = manifest.get("elements") or []
+    for el in elements:
+        for key in ("id", "ref_fasta", "citation"):
+            if not el.get(key):
+                raise ValueError(
+                    f"mobile_elements manifest {path}: element missing '{key}'")
+    return elements
+
+
+def _parse_vcf_alt_calls(path):
+    """{(chrom, pos): (ref, alt)} for haploid ALT calls in a bcftools VCF.
+
+    The lite `call_variants` rule already filters QUAL>=30 and DP>=min site
+    depth, so records here passed those floors. GT must be haploid-alt
+    ("1", "1/1", "1|1"); anything else is ignored, never guessed."""
+    calls = {}
+    opener = _gzip.open if str(path).endswith(".gz") else open
+    with opener(path, "rt") as f:
+        for line in f:
+            if line.startswith("#"):
+                continue
+            p = line.rstrip("\n").split("\t")
+            if len(p) < 10:
+                continue
+            chrom, pos, _id, ref, alts = p[0], int(p[1]), p[2], p[3], p[4]
+            alt = alts.split(",")[0]
+            fmt = p[8].split(":")
+            vals = p[9].split(":")
+            try:
+                gt = vals[fmt.index("GT")]
+            except (ValueError, IndexError):
+                continue
+            if gt in ("1", "1/1", "1|1"):
+                calls[(chrom, pos)] = (ref, alt)
+    return calls
+
+
+def _parse_fasta_records(path):
+    """{record_name: sequence} (upper-cased). First word of the header."""
+    records, name, chunks = {}, None, []
+    opener = _gzip.open if str(path).endswith(".gz") else open
+    with opener(path, "rt") as f:
+        for line in f:
+            if line.startswith(">"):
+                if name is not None:
+                    records[name] = "".join(chunks).upper()
+                name = line[1:].split()[0]
+                chunks = []
+            elif name is not None:
+                chunks.append(line.strip())
+    if name is not None:
+        records[name] = "".join(chunks).upper()
+    return records
+
+
+def _translate_codon(codon):
+    """Single-letter AA, or None when the codon is incomplete/ambiguous."""
+    codon = (codon or "").upper()
+    if len(codon) != 3 or any(b not in "ACGT" for b in codon):
+        return None
+    return _CODON_TABLE[codon]
+
+
+def call_alleles(vcf_path, consensus_path, allele_table):
+    """Allele calls from the filtered VCF + N-masked consensus.
+
+    For each codon entry: per-position called bases (VCF ALT where a haploid
+    variant record exists, else the consensus base — which is N below the
+    depth floor), assembled in mRNA order (complemented on minus strand),
+    translated, and matched against the entry's interpretations.
+
+    Returns {"codons": {id: {...}}, "genes": {gene: {...}}, "cds_scans": [...]}.
+    Any site that cannot be established -> "indeterminate", never guessed.
+    """
+    alt_calls = _parse_vcf_alt_calls(vcf_path)
+    consensus = _parse_fasta_records(consensus_path)
+
+    codon_results = {}
+    for entry in allele_table["codons"]:
+        cid = entry["id"]
+        chrom = entry["chrom"]
+        strand = entry.get("strand", "+")
+        bases = []
+        ok = True
+        for pos in entry["positions"]:
+            b = None
+            if (chrom, pos) in alt_calls:
+                _ref, alt = alt_calls[(chrom, pos)]
+                # Only single-base ALTs resolve a codon site; anything
+                # else (indel/MNP) makes the codon indeterminate.
+                b = alt if alt and len(alt) == 1 else None
+            else:
+                seq = consensus.get(chrom)
+                if seq is not None and 1 <= pos <= len(seq) and seq[pos - 1] != "N":
+                    b = seq[pos - 1]
+            if b is None:
+                ok = False
+                break
+            bases.append(b)
+        if not ok:
+            codon_results[cid] = {
+                "call": "indeterminate",
+                "observed_aa": None,
+                "reason": "site below depth/QUAL floor or unresolvable",
+            }
+            continue
+        codon = "".join(_COMP[b] if strand == "-" else b for b in bases)
+        aa = _translate_codon(codon)
+        if aa is None:
+            codon_results[cid] = {
+                "call": "indeterminate",
+                "observed_aa": None,
+                "reason": "ambiguous codon",
+            }
+            continue
+        interp = (entry.get("interpretations") or {}).get(aa)
+        codon_results[cid] = {
+            "call": interp["allele"] if interp else "other",
+            "observed_aa": aa,
+            "observed_codon": codon,
+            "ref_aa": entry.get("ref_aa"),
+            "citation": interp["citation"] if interp else None,
+            "ruo": RUO_ALLELE_TEMPLATE.format(
+                feature=f"{entry['gene']} codon {cid.split('_')[-1]}",
+                variant=interp["allele"] if interp else f"non-canonical {aa}",
+                citation=interp["citation"] if interp else entry.get("derivation", ""),
+            ),
+        }
+
+    genes = {}
+    for gene, rollup in (allele_table.get("gene_rollups") or {}).items():
+        parts = [codon_results.get(c, {}).get("call") for c in rollup["codons"]]
+        if any(p == "indeterminate" for p in parts):
+            call = "indeterminate"
+        elif all(p == rollup["all_ctxB7"] for p in parts):
+            call = rollup["all_ctxB7"]
+        elif all(p == rollup["all_classical-like"] for p in parts):
+            call = rollup["all_classical-like"]
+        else:
+            call = "other"
+        genes[gene] = {
+            "call": call,
+            "codon_calls": {c: codon_results.get(c, {}).get("call") for c in rollup["codons"]},
+            "citation": rollup.get("citation"),
+        }
+
+    scans = []
+    for scan in allele_table.get("cds_scans", []):
+        chrom = scan["chrom"]
+        start, end = scan["span_1based"]
+        variants = []
+        for (c, pos), (ref, alt) in sorted(alt_calls.items()):
+            if c == chrom and start <= pos <= end:
+                kind = "snp" if len(ref) == 1 and len(alt) == 1 else "indel"
+                variants.append({
+                    "pos": pos,
+                    "ref": ref,
+                    "alt": alt,
+                    "kind": kind,
+                    "frameshift_candidate": kind == "indel" and abs(len(ref) - len(alt)) % 3 != 0,
+                })
+        scans.append({
+            "id": scan["id"],
+            "span": scan["span_1based"],
+            "n_variants": len(variants),
+            "variants": variants,
+            "note": scan.get("note"),
+            "citation": scan.get("citation"),
+        })
+
+    return {"codons": codon_results, "genes": genes, "cds_scans": scans}
+
+
+# --- Phase 5B.6: SXT-ICE segment profiling -----------------------------------
+
+def profile_ice_segments(segment_breadths, present_breadth=80.0, absent_breadth=20.0):
+    """ICE structural pattern from per-segment coverage breadth.
+
+    segment_breadths: {segment_name: breadth_pct}; expected segments
+    SXT_cargo1 (floR..sul2), SXT_backbone1 (traI/traD), SXT_backbone2 (traC),
+    SXT_cargo2 (dfrA1). A segment is 'low' below absent_breadth, 'high' at or
+    above present_breadth, else 'partial'.
+
+    The XDR AFR13 genotype (Nat Commun Lebanon 2024) layers a ~10 kb deletion
+    in ICEVchInd5 that removes cargo block 1 while keeping the backbone and
+    dfrA1. This reports the coverage PATTERN consistent with that deletion --
+    short-read breadth cannot prove a deletion, so the call is 'consistent
+    with', never 'deletion confirmed'.
+    """
+    segs = {}
+    for name, breadth in (segment_breadths or {}).items():
+        if breadth is None:
+            segs[name] = "indeterminate"
+        elif breadth >= present_breadth:
+            segs[name] = "high"
+        elif breadth < absent_breadth:
+            segs[name] = "low"
+        else:
+            segs[name] = "partial"
+
+    def is_state(name, *states):
+        return segs.get(name) in states
+
+    if any(v == "indeterminate" for v in segs.values()):
+        pattern = "indeterminate"
+    elif (is_state("SXT_cargo1", "high") and is_state("SXT_backbone1", "high")
+          and is_state("SXT_backbone2", "high") and is_state("SXT_cargo2", "high")):
+        pattern = "intact"
+    elif (is_state("SXT_cargo1", "low") and is_state("SXT_backbone1", "high")
+          and is_state("SXT_backbone2", "high") and is_state("SXT_cargo2", "high")):
+        pattern = "ICEVchInd5-like"
+    else:
+        pattern = "other"
+
+    notes = {
+        "intact": "ICE backbone and cargo blocks all high-breadth.",
+        "ICEVchInd5-like": (
+            "Coverage pattern consistent with the published ICEVchInd5 "
+            "~10 kb deletion (cargo block 1 low, backbone and dfrA1 retained; "
+            "Rouard et al. via Nat Commun Lebanon 2024). Short-read breadth "
+            "cannot confirm a deletion."
+        ),
+        "other": "Segment pattern matches neither intact nor ICEVchInd5-like.",
+        "indeterminate": "A segment had no usable coverage data.",
+    }
+    return {
+        "pattern": pattern,
+        "segments": segs,
+        "citation": "Nat Commun 2024 (Lebanon XDR AFR13 ICEVchInd5 deletion)",
+        "note": notes[pattern],
+    }
+
+
+# --- Phase 5B.7: IncC YemVchMDRI plasmid gene-set screen ----------------------
+
+YEMVCHMDRI_GENES = ["blaPER-7", "mph(A)", "mph(E)", "msr(E)", "aadA2", "qac", "sul1"]
+YEMVCHMDRI_ALIASES = {
+    "blaPER7": "blaPER-7", "blaPER_7": "blaPER-7",
+    "mphA": "mph(A)", "mphE": "mph(E)", "msrE": "msr(E)",
+    "qacE": "qac", "qacEΔ1": "qac", "qacEdelta1": "qac", "qacEΔ1": "qac",
+}
+
+
+def plasmid_screen(amr_genes):
+    """YemVchMDRI gene-set co-occurrence on AMRFinderPlus gene symbols.
+
+    The XDR AFR13 plasmid pCNRVC190243 carries blaPER-7, mph(A), mph(E),
+    msr(E), aadA2, qac, sul1 (Rouard et al., NEJM Dec 2024). AMRFinderPlus
+    detects genes, not plasmids: the call is 'consistent with', never
+    'plasmid confirmed' -- short reads cannot prove plasmid carriage.
+    """
+    normalized = set()
+    for g in amr_genes or []:
+        g = (g or "").strip()
+        normalized.add(YEMVCHMDRI_ALIASES.get(g, g))
+    detected = [g for g in YEMVCHMDRI_GENES if g in normalized]
+    missing = [g for g in YEMVCHMDRI_GENES if g not in normalized]
+    if not detected:
+        call = "absent"
+    elif not missing:
+        call = "consistent"
+    else:
+        call = "partial"
+    return {
+        "call": call,
+        "genes_detected": detected,
+        "genes_missing": missing,
+        "citation": "Rouard et al., NEJM Dec 2024 (XDR AFR13, IncC pCNRVC190243)",
+        "note": (
+            "Gene-set co-detection only. Consistent with the published IncC "
+            "plasmid gene set; plasmid carriage cannot be proven from "
+            "short-read gene detection. " + AMR_NOTE
+        ),
+    }
+
+
+# --- Phase 5B.3/5B.4: mobile-element screens (config-gated) --------------------
+
+def summarize_mobile_elements(element_rows, present_breadth=80.0, absent_breadth=20.0):
+    """{element: {call, breadth_pct, mean_depth}} from per-element coverage
+    rows: [{element, breadth_pct, mean_depth}]. Same breadth semantics as
+    call_loci: presence of reference-like sequence only. Elements are mobile
+    by nature -- call presence per element, never genome completeness."""
+    out = {}
+    for row in element_rows or []:
+        name = row.get("element")
+        breadth = row.get("breadth_pct")
+        if not name or breadth is None:
+            continue
+        if breadth >= present_breadth:
+            call = "present"
+        elif breadth < absent_breadth:
+            call = "absent"
+        else:
+            call = "partial"
+        out[name] = {
+            "call": call,
+            "breadth_pct": round(float(breadth), 2),
+            "mean_depth": round(float(row.get("mean_depth") or 0), 2),
+            "citation": row.get("citation"),
+        }
+    return out

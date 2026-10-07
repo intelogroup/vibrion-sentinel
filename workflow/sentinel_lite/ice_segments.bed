@@ -1,0 +1,20 @@
+# Phase 5B.6 — SXT/R391 ICE structural segments on 2010EL-1786 (CP003069.1).
+# BED: 0-based start, end-exclusive. Curated 2026-10-07 from the NCBI GenBank
+# record CP003069.1; all rows `ann` except where noted.
+#
+# Purpose: detect the ICEVchInd5-like structural pattern (Nat Commun Lebanon
+# 2024) where the ~10 kb cargo block 1 (floR/strB/strA/sul2) is deleted while
+# the conjugative backbone and dfrA1 are retained. Per-segment breadth is
+# compared by report_lib.profile_ice_segments; the call is "coverage pattern
+# consistent with", never "deletion confirmed" (short-read breadth cannot
+# prove a deletion).
+#
+#chrom	start	end	name	score	strand	source
+# cargo block 1: floR/strB/strA/sul2 (1-based 98146-102832)
+CP003069.1	98145	102832	SXT_cargo1	.	-	ann
+# backbone block 1: traI (Vch1786_I0103) + traD (Vch1786_I0104), 1-based 125439-129459
+CP003069.1	125438	129459	SXT_backbone1	.	+	ann:Vch1786_I0103/I0104
+# backbone block 2: traC (Vch1786_I0118), 1-based 138426-140826
+CP003069.1	138425	140826	SXT_backbone2	.	+	ann:Vch1786_I0118
+# cargo block 2: dfrA1 (1-based 168756-169230)
+CP003069.1	168755	169230	SXT_cargo2	.	-	ann
