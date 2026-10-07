@@ -20,7 +20,7 @@ dependencies:
   - flye=2.9.5
   - medaka=2.0.1  # models baked into the Docker image; see Dockerfile
   - mlst=2.23.0  # PubMLST V. cholerae scheme
-  - amrfinderplus=3.12.8  # DB baked into the Docker image; version recorded
+  - ncbi-amrfinderplus=3.12.8  # DB baked into the Docker image; version recorded
   - pip>=23.0
   - pip:
       # vibecheck (cholgen/vibecheck) is not on bioconda; pin the exact commit.
