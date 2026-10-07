@@ -53,6 +53,10 @@ class Storage:
     def download_to_file(self, key: str, dest_path: str) -> None:
         raise NotImplementedError
 
+    def list_prefix(self, prefix: str) -> list[str]:
+        """All keys starting with prefix (for org purge / migration)."""
+        raise NotImplementedError
+
 
 class MemoryStorage(Storage):
     """In-memory store. Tests only — never holds more than test fixtures."""
@@ -88,6 +92,9 @@ class MemoryStorage(Storage):
     def download_to_file(self, key: str, dest_path: str) -> None:
         with open(dest_path, "wb") as f:
             f.write(bytes(self._bufs[key]))
+
+    def list_prefix(self, prefix: str) -> list[str]:
+        return sorted(k for k in self._bufs if k.startswith(prefix))
 
     # test introspection
     def exists(self, key: str) -> bool:
@@ -178,3 +185,11 @@ class R2Storage(Storage):
         tmp = dest_path + ".part"
         self._s3.download_file(self._bucket, key, tmp)
         shutil.move(tmp, dest_path)
+
+    def list_prefix(self, prefix: str) -> list[str]:
+        paginator = self._s3.get_paginator("list_objects_v2")
+        keys: list[str] = []
+        for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                keys.append(obj["Key"])
+        return sorted(keys)

@@ -33,6 +33,12 @@ class Settings:
     # Upload policy.
     max_upload_bytes: int = field(default_factory=lambda: _int("MAX_UPLOAD_BYTES", 10_000_000_000))
 
+    # Envelope encryption (Phase 2): KEK held in env, base64, 32 bytes.
+    # This is the stepping stone; a managed KMS is the documented follow-up.
+    sentinel_kek_b64: str = field(
+        default_factory=lambda: os.environ.get("SENTINEL_KEK", "")
+    )
+
     # Pipeline invocation (worker).
     repo_dir: str = field(default_factory=lambda: os.environ.get("REPO_DIR", "/app"))
     pipeline_refdir: str = field(
@@ -45,6 +51,12 @@ class Settings:
     @property
     def snakefile(self) -> str:
         return os.path.join(self.repo_dir, "workflow", "sentinel_lite", "Snakefile")
+
+    def require_kek(self) -> bytes:
+        """Load the KEK or fail closed. Call at process startup."""
+        from .crypto import load_kek
+
+        return load_kek()
 
     def require_db(self) -> None:
         if not self.supabase_url or not self.supabase_service_role_key:
