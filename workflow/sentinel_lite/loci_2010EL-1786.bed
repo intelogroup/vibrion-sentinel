@@ -24,8 +24,10 @@
 #     1036-aa protein identical to C6706 VexB (NCBI protein QPC53479.1);
 #     annotated as Vch1786_I2444 (conserved hypothetical protein).
 #     Weng et al., PLOS Pathog 2026: VexB couples MDR with hypervirulence.
-#   - hapR omitted: not annotated as a CDS in N16961 or 2010EL-1786, and
-#     presence/absence cannot detect its known loss-of-function alleles.
+#   - hapR: not annotated as a named CDS in N16961 or 2010EL-1786, and
+#     presence/absence cannot detect its known loss-of-function alleles;
+#     the BED row uses homology-verified coordinates (see above) and the
+#     alleles table scans the CDS for observed variants only.
 #
 #chrom	start	end	name	score	strand	source
 # SXT/R391 ICE resistance cargo
