@@ -136,6 +136,76 @@ System requirements: 8 GB RAM minimum (16 GB recommended), 2+ CPU cores, 15 GB f
 
 ---
 
+## Phase 1: upload ingestion (`service/`)
+
+Field labs push raw FASTQ to Sentinel instead of waiting for public
+archives. tus 1.0.0 resumable uploads in, pipeline `report.json` out.
+
+```
+lab ── tus (POST /uploads, PATCH chunks, HEAD resume) ──► ingest-api
+                                                            │ job row (Supabase ingest_jobs)
+                                                            ▼ R2 intake/{org}/{job}/{file}
+                                                      ingest-worker ──► snakemake (sentinel_lite)
+                                                            │ report.json → job row + sentinel_runs mirror
+lab ◄── GET /jobs/{id} (status + report) ──────────────────┘
+```
+
+### Deploy
+
+```bash
+# 1. Create the tables (once, Supabase SQL editor):
+#    sql/ingest_jobs.sql   sql/org_api_keys.sql
+# 2. Create an API key for the lab (prints once — store it safely):
+python -m service.make_key --org-id mirebalais --name mirebalais-lab-uploader
+# 3. Export env and bring up the service:
+export SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+       R2_ENDPOINT_URL=... R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=... \
+       R2_BUCKET=... PIPELINE_REFDIR=/app/data/references
+docker compose up --build ingest-api ingest-worker
+```
+
+### Environment variables
+
+| Variable | Required | Default | Purpose |
+|---|---|---|---|
+| `SUPABASE_URL` | yes | — | PostgREST endpoint (same project as `sentinel_runs`) |
+| `SUPABASE_SERVICE_ROLE_KEY` | yes | — | service-role key; API + worker bypass RLS with it |
+| `R2_ENDPOINT_URL` | yes | — | S3-compatible endpoint |
+| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | yes | — | R2 credentials (env only, never baked into the image) |
+| `R2_BUCKET` | yes | — | intake bucket |
+| `PIPELINE_REFDIR` | yes (worker) | `/app/data/references` | reference bundle for the pipeline |
+| `SNAKEMAKE_CORES` | no | `4` | worker parallelism |
+| `MAX_UPLOAD_BYTES` | no | `10000000000` (10 GB) | per-file cap (multiplexed runs are 2–8 GB) |
+| `WORKER_POLL_INTERVAL` | no | `10` | seconds between claim attempts |
+| `REPO_DIR` | no | `/app` | repo root inside the image (locates the Snakefile) |
+| `API_PORT` | no | `8000` | host port for the API |
+
+### Upload protocol (tus 1.0.0 core)
+
+`Upload-Metadata` keys: `filename`, `platform` (`illumina`|`nanopore`),
+`basecaller_model` (`fast`|`hac`|`sup`), `tier` (`lite`|`assembly`, default
+`lite`), optional `checksum` (sha256 hex, verified at completion).
+Fail-closed exactly like the pipeline: `platform=nanopore` without
+`basecaller_model` → 400 at creation; a parity test
+(`service/tests/test_tus.py::test_validation_parity_with_pipeline`) asserts
+the API and `report_lib.validate_platform_config` accept/reject the same
+inputs. Auth is per-org bearer keys; one org's resources read as 404 to
+another (no existence oracle). Job statuses move forward only
+(`uploading → queued → running → done|failed`, `cancelled` from
+`uploading`/`queued`, `failed → queued` only via explicit retry) —
+enforced in code *and* by a database trigger (`sql/ingest_jobs.sql`).
+
+### What Phase 1 does NOT build (handoffs)
+
+- **Phase 2:** per-org encryption keys, data-deletion workflows, roles/teams/SSO,
+  full RBAC. The `org_id` scoping and `org_api_keys` table are the seam it builds on.
+- **Phase 3:** French/Creole PDF rendering, cloud batch/autoscaling workers
+  (Phase 1 runs one local worker via `FOR UPDATE SKIP LOCKED` claims, safe to
+  scale later), billing/metering.
+- Production hardening not yet done: rate limiting, request logging/audit trail,
+  R2 multipart streaming (Phase 1 stages chunks to local disk and PUTs once at
+  completion — see `service/app/storage.py`), TLS termination.
+
 ## Roadmap
 
 - **Strain database** — curated Postgres/PostgREST store: every Haitian/Caribbean isolate with collection date, department, clinical vs environmental origin, lineage, AMR, toxin, QC flags
