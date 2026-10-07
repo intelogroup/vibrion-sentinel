@@ -64,3 +64,9 @@ drop policy if exists "sentinel_runs read access" on sentinel_runs;
 create policy "sentinel_runs read access"
     on sentinel_runs for select
     using (true);
+
+-- 2026-10-06: recurrence/cluster watcher needs temporal + geographic metadata.
+-- Populated by the sentinel-watch workflow (Phase 1: metadata propagation);
+-- backfilled for historic rows by scripts/backfill_metadata.py.
+alter table sentinel_runs add column if not exists collection_date date;
+alter table sentinel_runs add column if not exists country text;

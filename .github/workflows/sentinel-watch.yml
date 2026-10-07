@@ -111,7 +111,7 @@ jobs:
           for attempt in 1 2 3 4 5; do
             if META=$(curl -sS --fail --retry 2 --retry-all-errors \
                            --connect-timeout 20 --max-time 180 \
-                           "https://www.ebi.ac.uk/ena/portal/api/filereport?accession=${ACC}&result=read_run&fields=run_accession,fastq_ftp,library_layout&format=json") \
+                           "https://www.ebi.ac.uk/ena/portal/api/filereport?accession=${ACC}&result=read_run&fields=run_accession,fastq_ftp,library_layout,collection_date,country&format=json") \
                && printf '%s' "$META" | python3 -c "import json,sys; json.load(sys.stdin)" 2>/dev/null; then
               break
             fi
@@ -208,8 +208,16 @@ jobs:
           R1="$(cd "$(dirname "$R1")" && pwd)/$(basename "$R1")"
           [ -n "$R2" ] && R2="$(cd "$(dirname "$R2")" && pwd)/$(basename "$R2")"
           python3 - "$ACC" "$PAIRED" "$R1" "$R2" <<'EOF'
+          import json as _json
           import sys
           acc, paired, r1, r2 = sys.argv[1], sys.argv[2] == "true", sys.argv[3], sys.argv[4]
+          # Sample metadata from the ENA filereport saved above (may be absent
+          # when the SRA Toolkit fallback ran -- leave null, never invent).
+          meta = {}
+          try:
+              meta = _json.load(open(f"work/{acc}/ena.json"))
+          except (FileNotFoundError, ValueError):
+              pass
           cfg = {
               "accession": acc,
               "paired": paired,
@@ -218,10 +226,15 @@ jobs:
               "refdir": "refs",
               "outdir": f"results/{acc}",
               "threads": 2,
+              "collection_date": meta.get("collection_date"),
+              "country": meta.get("country"),
           }
           with open(f"work/{acc}/config.yaml", "w") as f:
               for k, v in cfg.items():
-                  f.write(f"{k}: {str(v).lower() if isinstance(v, bool) else repr(v) if isinstance(v, str) else v}\n")
+                  if v is None:
+                      f.write(f"{k}: null\n")
+                  else:
+                      f.write(f"{k}: {str(v).lower() if isinstance(v, bool) else repr(v) if isinstance(v, str) else v}\n")
           print(open(f"work/{acc}/config.yaml").read())
           EOF
 
@@ -284,6 +297,8 @@ jobs:
           row = {
               "accession": r["accession"],
               "priority": priority,
+              "collection_date": r.get("collection_date"),
+              "country": r.get("country"),
               "pipeline_version": r.get("version"),
               "reference": r.get("reference"),
               "reads_raw": r.get("reads", {}).get("raw"),

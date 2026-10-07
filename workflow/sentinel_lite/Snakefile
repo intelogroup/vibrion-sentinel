@@ -594,6 +594,12 @@ def _run_report(input, output):
         "pipeline": "vibrion-sentinel-lite",
         "version": report_lib.PIPELINE_VERSION,
         "accession": ACC,
+        # Sample metadata from the ENA filereport (may be null when ENA
+        # lacks it or the SRA Toolkit fallback ran). The recurrence/cluster
+        # watcher needs collection_date; undated rows are excluded from
+        # temporal logic, never given an invented date.
+        "collection_date": config.get("collection_date"),
+        "country": config.get("country"),
         "platform": PLATFORM,
         "basecaller_model": BASECALLER_MODEL,
         "tier": TIER,
