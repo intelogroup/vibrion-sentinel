@@ -13,6 +13,19 @@ def _int(name: str, default: int) -> int:
         return default
 
 
+def _float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, default))
+    except ValueError:
+        return default
+
+
+def _bool(name: str, default: bool) -> bool:
+    return os.environ.get(name, str(default)).strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
 @dataclass
 class Settings:
     # Supabase (PostgREST; same project as sentinel_runs). Service-role key:
@@ -47,6 +60,18 @@ class Settings:
     snakemake_cores: int = field(default_factory=lambda: _int("SNAKEMAKE_CORES", 4))
     worker_workdir: str = field(default_factory=lambda: os.environ.get("WORKER_WORKDIR", "/tmp/sentinel-work"))
     worker_poll_interval: int = field(default_factory=lambda: _int("WORKER_POLL_INTERVAL", 10))
+    # Phase 3: worker pool size (claim is atomic; N workers never double-claim).
+    worker_concurrency: int = field(default_factory=lambda: _int("WORKER_CONCURRENCY", 2))
+    # Phase 3: wall-clock budget per job; runaways are killed -> failed/timeout.
+    job_timeout_hours: float = field(default_factory=lambda: _float("JOB_TIMEOUT_HOURS", 6.0))
+
+    # Phase 3: Auspice link-out base (empty = integration pending, documented).
+    auspice_base_url: str = field(default_factory=lambda: os.environ.get("AUSPICE_BASE_URL", ""))
+
+    # Phase 3: session cookie flags.
+    session_cookie_secure: bool = field(
+        default_factory=lambda: _bool("SESSION_COOKIE_SECURE", False)
+    )
 
     @property
     def snakefile(self) -> str:

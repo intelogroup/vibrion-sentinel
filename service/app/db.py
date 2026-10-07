@@ -33,11 +33,12 @@ class JobDB:
     """
 
     # Legal transitions. `failed -> queued` exists only for the explicit
-    # retry endpoint; nothing rewinds a job otherwise.
+    # retry endpoint. `running -> queued` exists only for bounded infra
+    # retries (max 3, worker-enforced); pipeline errors never rewind.
     TRANSITIONS: dict[str, set[str]] = {
         "uploading": {"queued", "failed", "cancelled"},
         "queued": {"running", "failed", "cancelled"},
-        "running": {"done", "failed"},
+        "running": {"done", "failed", "queued"},
         "failed": {"queued"},
         "done": set(),
         "cancelled": set(),
@@ -139,6 +140,63 @@ class JobDB:
 
     def mirror_sentinel_run(self, row: dict[str, Any]) -> None:
         """Upsert a row into sentinel_runs (accession = job id)."""
+        raise NotImplementedError
+
+    # -- human auth (Phase 3: portal) --------------------------------------
+    def create_user(self, email: str, password_hash: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def get_user(self, user_id: str) -> Optional[dict[str, Any]]:
+        raise NotImplementedError
+
+    def get_user_by_email(self, email: str) -> Optional[dict[str, Any]]:
+        raise NotImplementedError
+
+    def update_user_password(self, user_id: str, password_hash: str) -> None:
+        raise NotImplementedError
+
+    def create_session(
+        self, user_id: str, token_hash: str, expires_at: str
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def get_session(self, token_hash: str) -> Optional[dict[str, Any]]:
+        raise NotImplementedError
+
+    def revoke_session(self, token_hash: str) -> None:
+        raise NotImplementedError
+
+    def revoke_all_sessions(self, user_id: str) -> int:
+        raise NotImplementedError
+
+    def add_org_member(self, user_id: str, org_id: str, role: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def get_org_member(self, user_id: str, org_id: str) -> Optional[dict[str, Any]]:
+        raise NotImplementedError
+
+    def get_org_memberships(self, user_id: str) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    def create_invite(
+        self,
+        org_id: str,
+        email: str,
+        role: str,
+        token_hash: str,
+        expires_at: str,
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def get_invite(self, token_hash: str) -> Optional[dict[str, Any]]:
+        raise NotImplementedError
+
+    def use_invite(self, invite_id: str) -> None:
+        raise NotImplementedError
+
+    def get_job_any(self, job_id: str) -> Optional[dict[str, Any]]:
+        """Job lookup without org scoping (for session-user access checks).
+        The caller MUST verify membership before returning anything."""
         raise NotImplementedError
 
 
@@ -435,3 +493,182 @@ class SupabaseRestDB(JobDB):
         )
         if r.status_code not in (200, 201, 204):
             self._raise(r, "mirror_sentinel_run")
+
+    # -- human auth (Phase 3) -------------------------------------------------
+    def create_user(self, email: str, password_hash: str) -> dict[str, Any]:
+        r = self._client.post(
+            "/rest/v1/users",
+            content=json.dumps({"email": email, "password_hash": password_hash}),
+            headers={"Prefer": "return=representation"},
+        )
+        if r.status_code not in (200, 201):
+            self._raise(r, "create_user")
+        return r.json()[0]
+
+    def get_user(self, user_id: str) -> Optional[dict[str, Any]]:
+        r = self._client.get(
+            "/rest/v1/users", params={"id": f"eq.{user_id}", "limit": 1}
+        )
+        if r.status_code != 200:
+            self._raise(r, "get_user")
+        rows = r.json()
+        return rows[0] if rows else None
+
+    def get_user_by_email(self, email: str) -> Optional[dict[str, Any]]:
+        r = self._client.get(
+            "/rest/v1/users", params={"email": f"eq.{email}", "limit": 1}
+        )
+        if r.status_code != 200:
+            self._raise(r, "get_user_by_email")
+        rows = r.json()
+        return rows[0] if rows else None
+
+    def update_user_password(self, user_id: str, password_hash: str) -> None:
+        r = self._client.patch(
+            "/rest/v1/users",
+            params={"id": f"eq.{user_id}"},
+            content=json.dumps({"password_hash": password_hash}),
+        )
+        if r.status_code not in (200, 204):
+            self._raise(r, "update_user_password")
+
+    def create_session(
+        self, user_id: str, token_hash: str, expires_at: str
+    ) -> dict[str, Any]:
+        r = self._client.post(
+            "/rest/v1/user_sessions",
+            content=json.dumps(
+                {"user_id": user_id, "token_hash": token_hash,
+                 "expires_at": expires_at}
+            ),
+            headers={"Prefer": "return=representation"},
+        )
+        if r.status_code not in (200, 201):
+            self._raise(r, "create_session")
+        return r.json()[0]
+
+    def get_session(self, token_hash: str) -> Optional[dict[str, Any]]:
+        r = self._client.get(
+            "/rest/v1/user_sessions",
+            params={"token_hash": f"eq.{token_hash}", "limit": 1},
+        )
+        if r.status_code != 200:
+            self._raise(r, "get_session")
+        rows = r.json()
+        return rows[0] if rows else None
+
+    def revoke_session(self, token_hash: str) -> None:
+        from datetime import datetime, timezone
+
+        r = self._client.patch(
+            "/rest/v1/user_sessions",
+            params={"token_hash": f"eq.{token_hash}"},
+            content=json.dumps(
+                {"revoked_at": datetime.now(timezone.utc).isoformat()}
+            ),
+        )
+        if r.status_code not in (200, 204):
+            self._raise(r, "revoke_session")
+
+    def revoke_all_sessions(self, user_id: str) -> int:
+        from datetime import datetime, timezone
+
+        r = self._client.patch(
+            "/rest/v1/user_sessions",
+            params={"user_id": f"eq.{user_id}", "revoked_at": "is.null"},
+            content=json.dumps(
+                {"revoked_at": datetime.now(timezone.utc).isoformat()}
+            ),
+            headers={"Prefer": "return=representation"},
+        )
+        if r.status_code != 200:
+            self._raise(r, "revoke_all_sessions")
+        return len(r.json())
+
+    def add_org_member(
+        self, user_id: str, org_id: str, role: str
+    ) -> dict[str, Any]:
+        r = self._client.post(
+            "/rest/v1/org_members",
+            content=json.dumps(
+                {"user_id": user_id, "org_id": org_id, "role": role}
+            ),
+            headers={"Prefer": "return=representation"},
+        )
+        if r.status_code not in (200, 201):
+            self._raise(r, "add_org_member")
+        return r.json()[0]
+
+    def get_org_member(
+        self, user_id: str, org_id: str
+    ) -> Optional[dict[str, Any]]:
+        r = self._client.get(
+            "/rest/v1/org_members",
+            params={"user_id": f"eq.{user_id}", "org_id": f"eq.{org_id}",
+                    "limit": 1},
+        )
+        if r.status_code != 200:
+            self._raise(r, "get_org_member")
+        rows = r.json()
+        return rows[0] if rows else None
+
+    def get_org_memberships(self, user_id: str) -> list[dict[str, Any]]:
+        r = self._client.get(
+            "/rest/v1/org_members", params={"user_id": f"eq.{user_id}"}
+        )
+        if r.status_code != 200:
+            self._raise(r, "get_org_memberships")
+        return r.json()
+
+    def create_invite(
+        self,
+        org_id: str,
+        email: str,
+        role: str,
+        token_hash: str,
+        expires_at: str,
+    ) -> dict[str, Any]:
+        r = self._client.post(
+            "/rest/v1/org_invites",
+            content=json.dumps(
+                {"org_id": org_id, "email": email, "role": role,
+                 "token_hash": token_hash, "expires_at": expires_at}
+            ),
+            headers={"Prefer": "return=representation"},
+        )
+        if r.status_code not in (200, 201):
+            self._raise(r, "create_invite")
+        return r.json()[0]
+
+    def get_invite(self, token_hash: str) -> Optional[dict[str, Any]]:
+        r = self._client.get(
+            "/rest/v1/org_invites",
+            params={"token_hash": f"eq.{token_hash}", "limit": 1},
+        )
+        if r.status_code != 200:
+            self._raise(r, "get_invite")
+        rows = r.json()
+        return rows[0] if rows else None
+
+    def use_invite(self, invite_id: str) -> None:
+        from datetime import datetime, timezone
+
+        r = self._client.patch(
+            "/rest/v1/org_invites",
+            params={"id": f"eq.{invite_id}"},
+            content=json.dumps(
+                {"used_at": datetime.now(timezone.utc).isoformat()}
+            ),
+        )
+        if r.status_code not in (200, 204):
+            self._raise(r, "use_invite")
+
+    def get_job_any(self, job_id: str) -> Optional[dict[str, Any]]:
+        r = self._client.get(
+            "/rest/v1/ingest_jobs",
+            params={"id": f"eq.{job_id}", "limit": 1},
+        )
+        if r.status_code != 200:
+            self._raise(r, "get_job_any")
+        rows = r.json()
+        return rows[0] if rows else None

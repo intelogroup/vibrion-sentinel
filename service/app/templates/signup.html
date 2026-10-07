@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Sentinel — sign up</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 4rem auto; max-width: 380px; }
+  .ruo { background: #fff3cd; border: 2px solid #b58900; padding: 0.5rem 1rem;
+         font-weight: 700; margin-bottom: 1rem; font-size: 0.9rem; }
+  input { display: block; width: 100%; margin: 0.5rem 0; padding: 0.5rem;
+          box-sizing: border-box; }
+  button { padding: 0.5rem 1.5rem; }
+  .err { color: #b00020; }
+  .key { background: #f0f0f0; padding: 0.75rem; word-break: break-all;
+         font-family: monospace; font-size: 0.85rem; }
+</style></head>
+<body>
+<div class="ruo">For Research Use Only. Not for use in diagnostic procedures.</div>
+<h1>Sign up</h1>
+<p>Creates your account and a personal organization. Passwords need at least 12 characters.</p>
+<p class="err" id="err"></p>
+<div id="done" style="display:none">
+  <p>Account created. Save this API key — it is shown <strong>once</strong>:</p>
+  <p class="key" id="key"></p>
+  <p><a href="/dashboard">Go to your dashboard</a></p>
+</div>
+<form id="f">
+  <input name="email" type="email" placeholder="Email" required>
+  <input name="password" type="password" placeholder="Password (12+ characters)" required>
+  <button type="submit">Sign up</button>
+</form>
+<p>Have an account? <a href="/login">Log in</a></p>
+<script>
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const r = await fetch('/auth/signup', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({email: fd.get('email'), password: fd.get('password')}),
+  });
+  const j = await r.json();
+  if (r.ok) {
+    document.getElementById('f').style.display = 'none';
+    document.getElementById('done').style.display = 'block';
+    document.getElementById('key').textContent = j.api_key;
+  } else {
+    document.getElementById('err').textContent = j.detail || 'Signup failed';
+  }
+});
+</script>
+</body>
+</html>

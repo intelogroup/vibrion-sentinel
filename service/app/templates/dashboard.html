@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sentinel — dashboard</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         margin: 2rem auto; max-width: 1000px; color: #1a1a1a; line-height: 1.5; }
+  .ruo { background: #fff3cd; border: 2px solid #b58900; padding: 0.5rem 1rem;
+         font-weight: 700; margin-bottom: 1rem; font-size: 0.9rem; }
+  header { display: flex; justify-content: space-between; align-items: baseline;
+           border-bottom: 1px solid #ddd; padding-bottom: 0.5rem; }
+  table { border-collapse: collapse; width: 100%; margin: 0.75rem 0 2rem 0; }
+  th, td { border: 1px solid #ccc; padding: 0.4rem 0.6rem; text-align: left;
+           font-size: 0.9rem; }
+  th { background: #f0f0f0; }
+  .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 4px;
+           font-size: 0.8rem; font-weight: 700; }
+  .st-done { background: #eaf7ee; color: #1e7e34; }
+  .st-failed { background: #fdecea; color: #b00020; }
+  .st-running, .st-queued, .st-uploading { background: #e8f0fe; color: #1a73e8; }
+  .st-cancelled { background: #f0f0f0; color: #666; }
+  .qc-pass { background: #eaf7ee; color: #1e7e34; }
+  .qc-fail { background: #fdecea; color: #b00020; }
+  .role { font-size: 0.8rem; color: #555; }
+  .actions a, .actions button { margin-right: 0.5rem; font-size: 0.85rem; }
+  .actions form { display: inline; }
+  h2 { margin-top: 2rem; }
+  .empty { color: #666; font-style: italic; }
+</style>
+</head>
+<body>
+<div class="ruo">For Research Use Only. Not for use in diagnostic procedures.</div>
+<header>
+  <h1>Sentinel dashboard</h1>
+  <div>{{ user_email }} · <a href="/auth/logout" onclick="event.preventDefault(); fetch('/auth/logout', {method:'POST'}).then(()=>location='/login')">log out</a></div>
+</header>
+
+{% for org in orgs %}
+<h2>{{ org.org_id }} <span class="role">{{ org.role }}</span></h2>
+{% if org.jobs %}
+<table>
+  <tr><th>Job</th><th>File</th><th>Status</th><th>QC</th><th>Platform</th><th>Uploaded</th><th>Reports</th></tr>
+  {% for j in org.jobs %}
+  <tr>
+    <td><code>{{ j.id[:8] }}</code></td>
+    <td>{{ j.filename }}</td>
+    <td><span class="badge st-{{ j.status }}">{{ j.status }}</span></td>
+    <td>
+      {% if j.qc_status == "pass" %}<span class="badge qc-pass">PASS</span>
+      {% elif j.qc_status == "fail" %}<span class="badge qc-fail">FAIL</span>
+      {% else %}—{% endif %}
+    </td>
+    <td>{{ j.platform }}{% if j.tier == "assembly" %} · assembly{% endif %}</td>
+    <td>{{ j.created_at[:10] if j.created_at else "—" }}</td>
+    <td class="actions">
+      {% if j.status == "done" %}
+      <a href="/jobs/{{ j.id }}/report">HTML</a>
+      <a href="/jobs/{{ j.id }}/report.pdf">PDF</a>
+      <a href="/jobs/{{ j.id }}/tree">Tree</a>
+      {% endif %}
+      {% if j.status == "failed" and org.role in ("admin", "member") %}
+      <form method="post" action="/dashboard/jobs/{{ j.id }}/retry">
+        <button type="submit">Retry</button>
+      </form>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="empty">No jobs yet for this org.</p>
+{% endif %}
+{% endfor %}
+
+</body>
+</html>

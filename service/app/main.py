@@ -38,11 +38,15 @@ import secrets
 from typing import Annotated, Any, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from .auth import VALID_ROLES, Actor, hash_key, make_org_dependency
 from .config import Settings
 from .crypto import EncryptedStorage, KeyProvider
 from .db import JobDB, SupabaseError
+from .human_auth import SESSION_COOKIE, create_human_auth_router, make_user_dependency
+from .reports import render_html, render_pdf
 from .storage import Storage
 from .tus import parse_int_header, parse_metadata
 from .validation import validate_upload_params
@@ -82,9 +86,10 @@ def create_app(
     key_provider: Optional[KeyProvider] = None,
 ) -> FastAPI:
     settings = settings or Settings()
-    app = FastAPI(title="Vibrion Sentinel ingest service", version="2.0.0")
+    app = FastAPI(title="Vibrion Sentinel ingest service", version="3.0.0")
     require_actor = make_org_dependency(db)
     ActorDep = Annotated[Actor, Depends(require_actor)]
+    get_portal_user = make_user_dependency(db)
 
     def _forbidden(detail: str = "insufficient role for this action") -> HTTPException:
         # Within an org, role violations are 403. (Between orgs the 404
@@ -453,6 +458,164 @@ def create_app(
         except SupabaseError as e:
             raise HTTPException(status_code=502, detail=f"database error: {e}")
         return {"audit": rows, "limit": limit, "offset": offset}
+
+    # ------------------------------------------------------- Phase 3: reports
+    def _resolve_report_access(
+        request: Request, job_id: str
+    ) -> tuple[dict[str, Any], str]:
+        """(job, role) for report viewing: API key OR portal session.
+
+        API keys keep working unchanged. Humans opening a dashboard link
+        authenticate with the session cookie; they must be members of the
+        job's org. Cross-org: 404, never an oracle."""
+        auth = request.headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            try:
+                row = db.lookup_key(hash_key(auth[7:].strip()))
+            except SupabaseError as e:
+                raise HTTPException(status_code=502, detail=f"database error: {e}")
+            if row is None or row.get("revoked_at"):
+                raise HTTPException(status_code=401, detail="invalid API key")
+            job = _get_job_or_404(row["org_id"], job_id)
+            return job, row.get("role") or "member"
+        user = get_portal_user(request)
+        if user is None:
+            raise HTTPException(status_code=401, detail="login required")
+        try:
+            job = db.get_job_any(job_id)
+        except SupabaseError as e:
+            raise HTTPException(status_code=502, detail=f"database error: {e}")
+        if job is None:
+            raise _not_found()
+        try:
+            mem = db.get_org_member(user.id, job["org_id"])
+        except SupabaseError as e:
+            raise HTTPException(status_code=502, detail=f"database error: {e}")
+        if mem is None:
+            raise _not_found()
+        return job, mem.get("role") or "member"
+
+    def _report_or_404(job: dict[str, Any]) -> dict[str, Any]:
+        report = job.get("report")
+        if not isinstance(report, dict):
+            raise HTTPException(status_code=404, detail="report not ready yet")
+        return report
+
+    @app.get("/jobs/{job_id}/report", response_class=HTMLResponse)
+    def get_report_html(request: Request, job_id: str, lang: str = "en") -> str:
+        job, _role = _resolve_report_access(request, job_id)
+        report = _report_or_404(job)
+        return render_html(
+            report, job_id, job["org_id"], lang=lang,
+            uploaded_at=job.get("created_at"), completed_at=job.get("updated_at"),
+        )
+
+    @app.get("/jobs/{job_id}/report.pdf")
+    def get_report_pdf(request: Request, job_id: str, lang: str = "en") -> Response:
+        job, _role = _resolve_report_access(request, job_id)
+        report = _report_or_404(job)
+        try:
+            pdf = render_pdf(
+                report, job_id, job["org_id"], lang=lang,
+                uploaded_at=job.get("created_at"),
+                completed_at=job.get("updated_at"),
+            )
+        except RuntimeError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+        return Response(
+            content=pdf,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition":
+                    f'inline; filename="sentinel-report-{job_id[:8]}.pdf"'
+            },
+        )
+
+    @app.get("/jobs/{job_id}/tree")
+    def get_tree(request: Request, job_id: str) -> Any:
+        """Phylogeny link-out (Auspice). Embedding is a follow-up; until the
+        Auspice deployment exists this documents the pending integration."""
+        _resolve_report_access(request, job_id)  # auth first, then integrate
+        base = (settings.auspice_base_url or "").strip().rstrip("/")
+        if base:
+            return RedirectResponse(f"{base}/tree?job={job_id}", status_code=302)
+        return {
+            "tree": None,
+            "followup": "Auspice integration pending — see README Phase 3; "
+                        "set AUSPICE_BASE_URL to enable the link-out.",
+        }
+
+    # ------------------------------------------------------- Phase 3: portal
+    app.include_router(
+        create_human_auth_router(db, cookie_secure=settings.session_cookie_secure)
+    )
+
+    _dash_env = Environment(
+        loader=FileSystemLoader(
+            str(__import__("pathlib").Path(__file__).parent / "templates")
+        ),
+        autoescape=select_autoescape(default_for_string=True, default=False),
+    )
+
+    @app.get("/login", response_class=HTMLResponse)
+    def login_page() -> str:
+        return _dash_env.get_template("login.html").render()
+
+    @app.get("/signup", response_class=HTMLResponse)
+    def signup_page() -> str:
+        return _dash_env.get_template("signup.html").render()
+
+    @app.get("/dashboard", response_class=HTMLResponse)
+    def dashboard(request: Request) -> str:
+        user = get_portal_user(request)
+        if user is None:
+            return RedirectResponse("/login", status_code=302)
+        try:
+            memberships = db.get_org_memberships(user.id)
+        except SupabaseError as e:
+            raise HTTPException(status_code=502, detail=f"database error: {e}")
+        orgs = []
+        for m in memberships:
+            try:
+                jobs = db.list_jobs(m["org_id"], limit=100)
+            except SupabaseError:
+                jobs = []
+            for j in jobs:
+                rep = j.get("report") or {}
+                qc = rep.get("qc") or {}
+                j["qc_status"] = qc.get("status")
+            orgs.append({"org_id": m["org_id"], "role": m["role"], "jobs": jobs})
+        return _dash_env.get_template("dashboard.html").render(
+            user_email=user.email, orgs=orgs
+        )
+
+    @app.post("/dashboard/jobs/{job_id}/retry")
+    def dashboard_retry(request: Request, job_id: str) -> Any:
+        """Dashboard retry (session auth). Read-only dashboard except this."""
+        user = get_portal_user(request)
+        if user is None:
+            return RedirectResponse("/login", status_code=302)
+        try:
+            job = db.get_job_any(job_id)
+        except SupabaseError as e:
+            raise HTTPException(status_code=502, detail=f"database error: {e}")
+        if job is None:
+            raise _not_found()
+        try:
+            mem = db.get_org_member(user.id, job["org_id"])
+        except SupabaseError as e:
+            raise HTTPException(status_code=502, detail=f"database error: {e}")
+        if mem is None:
+            raise _not_found()
+        if mem.get("role") not in ("admin", "member"):
+            raise _forbidden()
+        if job["status"] != "failed":
+            raise HTTPException(status_code=409, detail="only failed jobs can be retried")
+        try:
+            db.transition(job, "queued", reason=None)
+        except (SupabaseError, ValueError) as e:
+            raise HTTPException(status_code=502, detail=str(e))
+        return RedirectResponse("/dashboard", status_code=303)
 
     return app
 
