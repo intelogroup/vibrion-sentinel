@@ -40,6 +40,9 @@ create table if not exists sentinel_runs (
     surveillance_loci    jsonb,   -- {locus: {call: present/partial/absent, present, mean_depth, breadth_pct}}
     report                jsonb,   -- full report.json, kept verbatim for anything not modeled above
 
+    deleted_at            timestamptz, -- Phase 2 tombstone: source job deleted,
+                                       -- row kept so aggregates don't rewrite history
+
     created_at           timestamptz not null default now()
 );
 

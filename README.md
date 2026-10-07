@@ -206,6 +206,116 @@ enforced in code *and* by a database trigger (`sql/ingest_jobs.sql`).
   R2 multipart streaming (Phase 1 stages chunks to local disk and PUTs once at
   completion — see `service/app/storage.py`), TLS termination.
 
+## Phase 2: multi-tenancy (`service/` + `sql/`)
+
+The org boundary becomes cryptographic, not just namespaced. Three pillars:
+least-privilege API keys (roles), per-org envelope encryption, and deletion
+workflows with an append-only audit trail.
+
+```
+lab ── Bearer <key:role> ──► ingest-api ── EncryptedStorage ──► R2
+        role ∈ {admin, member, viewer}      │ AES-256-GCM, per-file nonce
+                                            │ DEK per org (KEK-wrapped, versioned)
+                                            ▼ intake/{org}/{job}/{file} + {file}.meta.json
+```
+
+### Roles
+
+Roles live on API keys, not user accounts — the service is machine-to-machine
+(lab instruments uploading); human accounts/SSO are a Phase 3 portal concern.
+
+| Role | Upload | Read jobs/reports | Manage keys | Delete data | Rotate DEK |
+|---|---|---|---|---|---|
+| `admin` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `member` | ✓ | ✓ | — | ✓ (own org) | — |
+| `viewer` | — | ✓ | — | — | — |
+
+Within an org, role violations are **403**. Between orgs the Phase 1 rule
+stands: other-org resources read as **404**, never 403 (no existence oracle).
+
+Key management (admin only): `POST /org/keys` `{name, role}` (plaintext
+returned **once**), `GET /org/keys` (hash prefix, never plaintext),
+`DELETE /org/keys/{key_id}` (soft revoke via `revoked_at`; revoked keys fail
+closed with 401 on every route). Existing Phase 1 keys migrate to `admin`
+(`sql/migrate_002_api_key_roles.sql` — backfill keys off NULL so re-running
+never promotes later keys).
+
+### Envelope encryption
+
+```
+SENTINEL_KEK (env, base64, 32 bytes) ──wraps──► DEK per org (AES-256, random)
+                                                    ──encrypts──► upload bytes
+                                                      AES-256-GCM, fresh 96-bit nonce/file
+```
+
+**The KEK story, stated plainly:** an env-held KEK is the stepping stone, not
+the end state. A managed KMS (per-deploy KEK in an HSM/KMS, with rotation and
+audit) is the documented follow-up. What envelope encryption buys even with an
+env KEK: per-org cryptographic isolation at rest — a leaked R2 credential or
+bucket listing yields ciphertext, and org A's DEK never decrypts org B's
+objects. The service **fails closed at startup** without a valid `SENTINEL_KEK`
+(`Settings.require_kek()`), in both the API and the worker, rather than ever
+writing plaintext.
+
+- DEKs live in `org_data_keys` (current pointer) + `org_data_key_versions`
+  (every version ever issued). `sql/org_data_keys.sql`.
+- Per-file `{dek_version, nonce}` travels in a sidecar object
+  (`{key}.meta.json`), not R2 object metadata: it works uniformly across
+  storage backends, is visible in plain listings, and has no provider
+  metadata limits. The sidecar's explicit `"encryption": "aes256-gcm-v1"`
+  marker means "unencrypted" is never ambiguous — a missing/foreign sidecar
+  is a hard decryption failure, never a silent plaintext fallback.
+- GCM tag failure (tampered bytes) → the job moves to `failed`, never
+  corrupt-but-usable data.
+- **Rotation** (`POST /org/keys/rotate-dek`, admin): mints DEK v(n+1); old
+  versions are retained and history keeps decrypting with its recorded
+  version. **No eager re-encryption — deliberate:** re-encrypting is O(all
+  bytes) and buys nothing over versioned DEKs. Rotation bounds *future*
+  exposure after a suspected DEK compromise; it cannot retroactively protect
+  bytes already written (nothing can, short of re-encryption, which remains
+  available as a manual operation via `migrate_encrypt.py` if ever needed).
+- **Migration** (`python -m service.migrate_encrypt [--dry-run] [--org-id …]`):
+  encrypts Phase 1 plaintext objects in place, skipping already-encrypted
+  objects (idempotent) and partial uploads (jobs still `uploading`).
+
+### Deletion
+
+- `DELETE /jobs/{id}` (admin/member): deletes the intake object + sidecar and
+  the job row. The `sentinel_runs` mirror row is **kept and tombstoned**
+  (`deleted_at`, `sql/migrate_003_sentinel_runs_deleted_at.sql`) — **why:**
+  population-level aggregates (lineage trends, AMR frequencies) must not
+  silently rewrite history when a source sample is deleted. Live queries filter
+  `WHERE deleted_at IS NULL`; historical aggregates stay stable.
+- `DELETE /org/data` (admin only, body `{"confirm": "<org_id>"}` or 400): the
+  "we're leaving" button — purges all R2 objects under the org prefix, all job
+  rows, revokes all keys. DEK versions are retained (decrypting backups/audit
+  is a separate deliberate process).
+- **Audit log** (`audit_log`, append-only): `key.created`, `key.revoked`,
+  `dek.rotated`, `job.deleted`, `org.purged`. Append-only is enforced in code
+  (no update/delete methods exist), by a database trigger rejecting
+  UPDATE/DELETE, and by this documentation. `GET /org/audit` (admin,
+  `?limit=&offset=`).
+
+### New environment variables
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `SENTINEL_KEK` | yes | base64, 32 bytes; fail-closed at startup if missing/malformed. Generate: `python -c "import os,base64; print(base64.b64encode(os.urandom(32)).decode())"` |
+
+### New SQL files (run once each, in order)
+
+`sql/org_api_keys.sql` (now with `role`), `sql/migrate_002_api_key_roles.sql`,
+`sql/org_data_keys.sql`, `sql/audit_log.sql`,
+`sql/migrate_003_sentinel_runs_deleted_at.sql`.
+
+### What Phase 2 does NOT build (handoffs)
+
+- **Phase 3:** human user accounts, SSO/OIDC, teams within an org, the portal
+  UI, French/Creole PDF rendering, cloud batch/autoscaling workers,
+  billing/metering.
+- **KMS integration** for the KEK (documented follow-up; env-held for now).
+- Cross-org anything — there is no cross-org; that's the point.
+
 ## Roadmap
 
 - **Strain database** — curated Postgres/PostgREST store: every Haitian/Caribbean isolate with collection date, department, clinical vs environmental origin, lineage, AMR, toxin, QC flags

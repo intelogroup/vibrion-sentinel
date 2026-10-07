@@ -5,3 +5,4 @@ uvicorn==0.54.0
 httpx==0.28.1
 boto3==1.43.108
 pyyaml==6.0.3
+cryptography==46.0.3  # Phase 2: AES-256-GCM envelope encryption

@@ -1,26 +1,47 @@
-"""Phase 1 upload-ingestion API: tus 1.0.0 creation core + job status.
+"""Phase 2 multi-tenancy API: roles on keys, key management, envelope
+encryption, deletion workflows, audit log.
 
-Endpoints (all under per-org bearer auth; other-org resources read as 404):
+Roles (on API keys; the service is machine-to-machine):
 
-    POST   /uploads            tus creation (Upload-Length + Upload-Metadata)
-    HEAD   /uploads/{id}       resume offsets (Upload-Offset / Upload-Length)
-    PATCH  /uploads/{id}       chunk append (409 on offset mismatch)
-    DELETE /uploads/{id}       cancel a partial upload
-    GET    /jobs               calling org's jobs, newest first
-    GET    /jobs/{id}          job detail incl. report.json when done
-    POST   /jobs/{id}/retry    re-queue a failed job (explicit action only)
+    admin  — everything
+    member — upload + read + delete own org's jobs (no key management, no DEK rotation)
+    viewer — read-only
+
+Cross-org: 404, never 403 (no existence oracle). Within an org, role
+violations are 403.
+
+Endpoints (all under per-org bearer auth unless noted):
+
+    POST   /uploads            tus creation                    (admin, member)
+    HEAD   /uploads/{id}       resume offsets                  (admin, member)
+    PATCH  /uploads/{id}       chunk append                    (admin, member)
+    DELETE /uploads/{id}       cancel a partial upload         (admin, member)
+    GET    /jobs               calling org's jobs              (all roles)
+    GET    /jobs/{id}          job detail incl. report         (all roles)
+    POST   /jobs/{id}/retry    re-queue a failed job           (admin, member)
+    DELETE /jobs/{id}          delete job + its bytes          (admin, member)
+    POST   /org/keys           create key (plaintext once)     (admin)
+    GET    /org/keys           list keys                       (admin)
+    DELETE /org/keys/{key_id}  revoke key                      (admin)
+    POST   /org/keys/rotate-dek  new DEK version               (admin)
+    DELETE /org/data           full org purge (confirm=org_id)  (admin)
+    GET    /org/audit          audit log, paginated            (admin)
     GET    /health             liveness (no auth)
 
-Use create_app(db, storage, settings) so tests can inject fakes.
+Use create_app(db, storage, settings, key_provider=None) so tests can
+inject fakes. In production the storage MUST be an EncryptedStorage —
+build_app() wires that and fails closed without SENTINEL_KEK.
 """
 
 import os
+import secrets
 from typing import Annotated, Any, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 
-from .auth import make_org_dependency
+from .auth import VALID_ROLES, Actor, hash_key, make_org_dependency
 from .config import Settings
+from .crypto import EncryptedStorage, KeyProvider
 from .db import JobDB, SupabaseError
 from .storage import Storage
 from .tus import parse_int_header, parse_metadata
@@ -58,11 +79,35 @@ def create_app(
     db: JobDB,
     storage: Storage,
     settings: Optional[Settings] = None,
+    key_provider: Optional[KeyProvider] = None,
 ) -> FastAPI:
     settings = settings or Settings()
-    app = FastAPI(title="Vibrion Sentinel ingest service", version="1.0.0")
-    require_org = make_org_dependency(db)
-    Org = Annotated[str, Depends(require_org)]
+    app = FastAPI(title="Vibrion Sentinel ingest service", version="2.0.0")
+    require_actor = make_org_dependency(db)
+    ActorDep = Annotated[Actor, Depends(require_actor)]
+
+    def _forbidden(detail: str = "insufficient role for this action") -> HTTPException:
+        # Within an org, role violations are 403. (Between orgs the 404
+        # oracle rule still applies: _get_job_or_404 etc. filter by org.)
+        return HTTPException(status_code=403, detail=detail)
+
+    def _require(actor: Actor, *roles: str) -> None:
+        if actor.role not in roles:
+            raise _forbidden(
+                f"role {actor.role!r} cannot perform this action "
+                f"(requires one of {roles})"
+            )
+
+    def _audit(actor: Actor, action: str, target: str, detail: Optional[dict] = None) -> None:
+        try:
+            db.audit(actor.org_id, actor.key_id, action, target, detail or {})
+        except SupabaseError:
+            # Audit failure must not mask the primary action's result, but
+            # it must not pass silently either: surface it in the response?
+            # Decision: log-and-continue would hide a broken audit trail, so
+            # we let it raise as a 502 — the action already happened, and
+            # the operator sees the audit gap explicitly.
+            raise HTTPException(status_code=502, detail="audit log write failed")
 
     def _not_found() -> HTTPException:
         # 404 for missing AND other-org resources: no existence oracle.
@@ -84,11 +129,13 @@ def create_app(
     # ------------------------------------------------------------------ tus
     @app.post("/uploads", status_code=201)
     def create_upload(
-        org_id: Org,
+        actor: ActorDep,
         request: Request,
         upload_length: Annotated[Optional[str], Header(alias="Upload-Length")] = None,
         upload_metadata: Annotated[Optional[str], Header(alias="Upload-Metadata")] = None,
     ) -> Response:
+        _require(actor, "admin", "member")
+        org_id = actor.org_id
         try:
             length = parse_int_header(upload_length, "Upload-Length")
         except ValueError as e:
@@ -140,8 +187,9 @@ def create_app(
         )
 
     @app.head("/uploads/{job_id}")
-    def upload_offset(org_id: Org, job_id: str) -> Response:
-        job = _get_job_or_404(org_id, job_id)
+    def upload_offset(actor: ActorDep, job_id: str) -> Response:
+        _require(actor, "admin", "member")
+        job = _get_job_or_404(actor.org_id, job_id)
         return Response(
             status_code=200,
             headers={
@@ -154,11 +202,13 @@ def create_app(
 
     @app.patch("/uploads/{job_id}", status_code=204)
     async def append_chunk(
-        org_id: Org,
+        actor: ActorDep,
         job_id: str,
         request: Request,
         upload_offset: Annotated[Optional[str], Header(alias="Upload-Offset")] = None,
     ) -> Response:
+        _require(actor, "admin", "member")
+        org_id = actor.org_id
         job = _get_job_or_404(org_id, job_id)
         if job["status"] != "uploading":
             raise HTTPException(
@@ -209,8 +259,9 @@ def create_app(
         )
 
     @app.delete("/uploads/{job_id}", status_code=204)
-    def cancel_upload(org_id: Org, job_id: str) -> Response:
-        job = _get_job_or_404(org_id, job_id)
+    def cancel_upload(actor: ActorDep, job_id: str) -> Response:
+        _require(actor, "admin", "member")
+        job = _get_job_or_404(actor.org_id, job_id)
         if job["status"] not in ("uploading", "queued"):
             raise HTTPException(
                 status_code=409,
@@ -222,20 +273,21 @@ def create_app(
 
     # ------------------------------------------------------------------ jobs
     @app.get("/jobs")
-    def list_jobs(org_id: Org) -> dict[str, Any]:
+    def list_jobs(actor: ActorDep) -> dict[str, Any]:
         try:
-            jobs = db.list_jobs(org_id)
+            jobs = db.list_jobs(actor.org_id)
         except SupabaseError as e:
             raise HTTPException(status_code=502, detail=f"database error: {e}")
         return {"jobs": [_job_summary(j) for j in jobs]}
 
     @app.get("/jobs/{job_id}")
-    def get_job(org_id: Org, job_id: str) -> dict[str, Any]:
-        return _job_detail(_get_job_or_404(org_id, job_id))
+    def get_job(actor: ActorDep, job_id: str) -> dict[str, Any]:
+        return _job_detail(_get_job_or_404(actor.org_id, job_id))
 
     @app.post("/jobs/{job_id}/retry")
-    def retry_job(org_id: Org, job_id: str) -> dict[str, Any]:
-        job = _get_job_or_404(org_id, job_id)
+    def retry_job(actor: ActorDep, job_id: str) -> dict[str, Any]:
+        _require(actor, "admin", "member")
+        job = _get_job_or_404(actor.org_id, job_id)
         if job["status"] != "failed":
             raise HTTPException(
                 status_code=409,
@@ -247,24 +299,189 @@ def create_app(
             raise HTTPException(status_code=502, detail=str(e))
         return _job_summary(job)
 
+    @app.delete("/jobs/{job_id}", status_code=204)
+    def delete_job(actor: ActorDep, job_id: str) -> Response:
+        """Delete a job: its bytes (object + sidecar), its job row.
+
+        The sentinel_runs mirror row is KEPT and tombstoned with deleted_at:
+        population-level aggregates must not silently rewrite history when a
+        source sample is deleted. See README Phase 2.
+        """
+        _require(actor, "admin", "member")
+        job = _get_job_or_404(actor.org_id, job_id)
+        if job.get("r2_key"):
+            storage.delete(job["r2_key"])  # EncryptedStorage also drops the sidecar
+        try:
+            db.delete_job(job_id)
+        except SupabaseError as e:
+            raise HTTPException(status_code=502, detail=f"database error: {e}")
+        try:
+            db.mark_sentinel_run_deleted(job_id)
+        except SupabaseError:
+            pass  # no mirror row (job never ran) — not an error
+        _audit(actor, "job.deleted", job_id, {"filename": job.get("filename")})
+        return Response(status_code=204)
+
+    # ------------------------------------------------------------------ org
+    def _key_summary(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "name": row.get("name"),
+            "role": row.get("role"),
+            "key_hash_prefix": (row.get("key_hash") or "")[:10],
+            "created_at": row.get("created_at"),
+            "revoked_at": row.get("revoked_at"),
+        }
+
+    @app.post("/org/keys", status_code=201)
+    def create_api_key(actor: ActorDep, body: dict) -> dict[str, Any]:
+        _require(actor, "admin")
+        name = (body or {}).get("name") or ""
+        role = (body or {}).get("role") or "member"
+        if role not in VALID_ROLES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown role {role!r}; expected one of {VALID_ROLES}",
+            )
+        plaintext = "sk_" + secrets.token_urlsafe(32)
+        try:
+            row = db.insert_api_key(
+                actor.org_id, hash_key(plaintext), name, role
+            )
+        except SupabaseError as e:
+            raise HTTPException(status_code=502, detail=f"database error: {e}")
+        _audit(actor, "key.created", row["id"], {"name": name, "role": role})
+        # The plaintext is returned ONCE and never stored.
+        return {"id": row["id"], "name": name, "role": role, "api_key": plaintext}
+
+    @app.get("/org/keys")
+    def list_api_keys(actor: ActorDep) -> dict[str, Any]:
+        _require(actor, "admin")
+        try:
+            rows = db.list_api_keys(actor.org_id)
+        except SupabaseError as e:
+            raise HTTPException(status_code=502, detail=f"database error: {e}")
+        return {"keys": [_key_summary(r) for r in rows]}
+
+    @app.delete("/org/keys/{key_id}", status_code=204)
+    def revoke_api_key(actor: ActorDep, key_id: str) -> Response:
+        _require(actor, "admin")
+        try:
+            row = db.get_api_key(actor.org_id, key_id)
+        except SupabaseError as e:
+            raise HTTPException(status_code=502, detail=f"database error: {e}")
+        if row is None:
+            # 404 for other orgs' keys too: no existence oracle.
+            raise _not_found()
+        if row.get("revoked_at"):
+            raise HTTPException(status_code=409, detail="key already revoked")
+        try:
+            db.revoke_api_key(actor.org_id, key_id)
+        except SupabaseError as e:
+            raise HTTPException(status_code=502, detail=f"database error: {e}")
+        _audit(actor, "key.revoked", key_id, {"name": row.get("name")})
+        return Response(status_code=204)
+
+    @app.post("/org/keys/rotate-dek")
+    def rotate_dek(actor: ActorDep) -> dict[str, Any]:
+        _require(actor, "admin")
+        if key_provider is None:
+            raise HTTPException(
+                status_code=503, detail="encryption not configured on this deployment"
+            )
+        try:
+            new_version = key_provider.rotate(actor.org_id)
+        except SupabaseError as e:
+            raise HTTPException(status_code=502, detail=f"database error: {e}")
+        _audit(actor, "dek.rotated", actor.org_id, {"dek_version": new_version})
+        return {"org_id": actor.org_id, "dek_version": new_version}
+
+    @app.delete("/org/data")
+    async def purge_org_data(actor: ActorDep, request: Request) -> dict[str, Any]:
+        """Full org purge: the "we're leaving" button.
+
+        Requires {"confirm": "<org_id>"} in the body (else 400). Deletes all
+        R2 objects under the org prefix, all job rows, and revokes all keys.
+        DEK versions are retained (decrypting the audit trail / backups is a
+        separate, deliberate process). Loud in the audit log.
+        """
+        _require(actor, "admin")
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict) or body.get("confirm") != actor.org_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f'body must be {{"confirm": "{actor.org_id}"}}',
+            )
+        prefix = f"intake/{actor.org_id}/"
+        try:
+            keys = storage.list_prefix(prefix)
+            for k in keys:
+                storage.delete(k)
+            n_jobs = db.delete_jobs_for_org(actor.org_id)
+            n_keys = db.revoke_all_keys(actor.org_id)
+        except SupabaseError as e:
+            raise HTTPException(status_code=502, detail=f"database error: {e}")
+        _audit(
+            actor,
+            "org.purged",
+            actor.org_id,
+            {
+                "objects_deleted": len(keys),
+                "jobs_deleted": n_jobs,
+                "keys_revoked": n_keys,
+            },
+        )
+        return {
+            "org_id": actor.org_id,
+            "objects_deleted": len(keys),
+            "jobs_deleted": n_jobs,
+            "keys_revoked": n_keys,
+        }
+
+    @app.get("/org/audit")
+    def get_audit(
+        actor: ActorDep, limit: int = 50, offset: int = 0
+    ) -> dict[str, Any]:
+        _require(actor, "admin")
+        limit = min(max(int(limit), 1), 200)
+        offset = max(int(offset), 0)
+        try:
+            rows = db.list_audit(actor.org_id, limit, offset)
+        except SupabaseError as e:
+            raise HTTPException(status_code=502, detail=f"database error: {e}")
+        return {"audit": rows, "limit": limit, "offset": offset}
+
     return app
 
 
 def build_app() -> FastAPI:
-    """Production entrypoint: real Supabase + R2 from env."""
+    """Production entrypoint: real Supabase + R2 from env.
+
+    Fail-closed: SENTINEL_KEK must be set (the storage layer encrypts every
+    upload with the org's DEK; without a KEK the service refuses to start
+    rather than writing plaintext).
+    """
     from .storage import R2Storage
 
     settings = Settings()
     settings.require_db()
     settings.require_r2()
+    kek = settings.require_kek()  # raises RuntimeError if missing/malformed
     db = SupabaseRestDB(settings.supabase_url, settings.supabase_service_role_key)
-    storage = R2Storage(
-        settings.r2_endpoint_url,
-        settings.r2_access_key_id,
-        settings.r2_secret_access_key,
-        settings.r2_bucket,
+    keys = KeyProvider(db, kek)
+    storage = EncryptedStorage(
+        R2Storage(
+            settings.r2_endpoint_url,
+            settings.r2_access_key_id,
+            settings.r2_secret_access_key,
+            settings.r2_bucket,
+        ),
+        keys,
     )
-    return create_app(db, storage, settings)
+    return create_app(db, storage, settings, keys)
 
 
 def asgi_app() -> FastAPI:

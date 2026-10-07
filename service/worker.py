@@ -25,6 +25,7 @@ from typing import Any, Callable
 import yaml
 
 from service.app.config import Settings
+from service.app.crypto import DecryptionError, EncryptedStorage, KeyProvider
 from service.app.db import JobDB, SupabaseRestDB
 from service.app.storage import R2Storage, Storage
 
@@ -126,7 +127,13 @@ def process_one_job(
     try:
         workdir.mkdir(parents=True, exist_ok=True)
         local_fastq = str(workdir / job["filename"])
-        storage.download_to_file(job["r2_key"], local_fastq)
+        try:
+            # With EncryptedStorage this authenticates + decrypts; a missing
+            # sidecar or GCM tag failure raises DecryptionError (fail closed).
+            storage.download_to_file(job["r2_key"], local_fastq)
+        except DecryptionError as e:
+            db.transition(job, "failed", reason=f"decryption failed: {e}")
+            return True
 
         # Optional integrity re-check at download time.
         want = (job.get("sha256") or "").strip().lower()
@@ -176,12 +183,16 @@ def main() -> None:
     settings = Settings()
     settings.require_db()
     settings.require_r2()
+    kek = settings.require_kek()  # fail closed: no KEK, no worker
     db = SupabaseRestDB(settings.supabase_url, settings.supabase_service_role_key)
-    storage = R2Storage(
-        settings.r2_endpoint_url,
-        settings.r2_access_key_id,
-        settings.r2_secret_access_key,
-        settings.r2_bucket,
+    storage = EncryptedStorage(
+        R2Storage(
+            settings.r2_endpoint_url,
+            settings.r2_access_key_id,
+            settings.r2_secret_access_key,
+            settings.r2_bucket,
+        ),
+        KeyProvider(db, kek),
     )
     os.makedirs(settings.worker_workdir, exist_ok=True)
     print(f"sentinel ingest worker: polling every {settings.worker_poll_interval}s", flush=True)

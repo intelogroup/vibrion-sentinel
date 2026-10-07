@@ -10,12 +10,28 @@ API is not an existence oracle.
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .db import JobDB
+
+VALID_ROLES = ("admin", "member", "viewer")
+
+
+@dataclass(frozen=True)
+class Actor:
+    """The authenticated caller: org identity + key identity + role.
+
+    Roles live on API keys (Phase 2 decision: the service is
+    machine-to-machine; human accounts/SSO are a Phase 3 portal concern).
+    """
+
+    org_id: str
+    key_id: str
+    role: str
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -33,9 +49,9 @@ def _unauthorized() -> HTTPException:
 
 
 def make_org_dependency(db: JobDB):
-    async def _get_org(
+    async def _get_actor(
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
-    ) -> str:
+    ) -> Actor:
         if credentials is None or credentials.scheme.lower() != "bearer":
             raise _unauthorized()
         digest = hash_key(credentials.credentials)
@@ -45,6 +61,10 @@ def make_org_dependency(db: JobDB):
             # (A timing oracle on hash compare is not a concern here: the
             # lookup is a DB equality check, not a secret comparison.)
             raise _unauthorized()
-        return row["org_id"]
+        return Actor(
+            org_id=row["org_id"],
+            key_id=row["id"],
+            role=row.get("role") or "member",
+        )
 
-    return _get_org
+    return _get_actor
