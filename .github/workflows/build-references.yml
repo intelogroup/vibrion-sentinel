@@ -67,6 +67,24 @@ jobs:
             return 1
           }
 
+          check_organism() { # check_organism <accession> <expected> <label>
+            # Fail-closed identity check: the accession's NCBI organism must
+            # contain <expected>. Catches mislabeled records (e.g. OQ860440.1
+            # was labeled "Haiti 2022 resurgence reference" but is SARS-CoV-2).
+            local acc="$1" expect="$2" label="$3" org
+            org=$(curl -fsSL --retry 3 --retry-delay 3 \
+              "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=nucleotide&id=${acc}&retmode=json" |
+              python3 -c "import json,sys; d=json.load(sys.stdin)['result']; v=d[[k for k in d if k!='uids'][0]]; print(v.get('organism',''))" 2>/dev/null || true)
+            case "$org" in
+              *"$expect"*)
+                echo "  organism ok: $label ($org)" ;;
+              *)
+                echo "ERROR: organism mismatch for $label: got '${org:-<none>}', expected '*${expect}*'" >&2
+                return 1 ;;
+            esac
+            sleep 1  # stay polite to NCBI
+          }
+
           EUTILS="https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide"
 
           echo "▶ Fetching 2010EL-1786 (fasta)..."
@@ -74,10 +92,20 @@ jobs:
           # CP003070.1: 1046365 bp, measured 2026-10-07).
           efetch "${EUTILS}&id=CP003069.1&rettype=fasta&retmode=text" chr1.fa 2728237
           efetch "${EUTILS}&id=CP003070.1&rettype=fasta&retmode=text" chr2.fa 941728
+          check_organism CP003069.1 "Vibrio cholerae" "2010EL-1786 chr1"
+          check_organism CP003070.1 "Vibrio cholerae" "2010EL-1786 chr2"
           cat chr1.fa chr2.fa > 2010EL-1786.fasta
 
           echo "▶ Fetching Haiti 2022 resurgence reference..."
-          efetch "${EUTILS}&id=OQ860440.1&rettype=fasta&retmode=text" Haiti_2022_Resurgence.fasta
+          # Strain GC-4755, clinical O1 Ogawa isolate, Port-au-Prince, Haiti,
+          # collected 2022-11-10 (GHESKIO). WGS project DBBSEV000000000
+          # (BioSample SAMN33964167, assembly GCA_044957725.1 / PDT002121683.1,
+          # SKESA, 623x Illumina): 68 contigs, 4308107 bp total, verified 2026-10-07.
+          # Replaces OQ860440.1, which NCBI esummary shows is SARS-CoV-2,
+          # not V. cholerae. min length = 90% of 4308107 bp.
+          HAITI_IDS=$(seq -f 'DBBSEV0100000%02.0f' 1 68 | paste -sd,)
+          efetch "${EUTILS}&id=${HAITI_IDS}&rettype=fasta&retmode=text" Haiti_2022_Resurgence.fasta 3877296
+          check_organism DBBSEV000000000 "Vibrio cholerae" "Haiti_2022_Resurgence"
 
           echo "▶ Mobile-element reference sequences (Phase 5B.3/5B.4 screens)..."
           mkdir -p mobile_refs
@@ -93,6 +121,10 @@ jobs:
           efetch "${EUTILS}&id=CP028894.1&seq_start=1336122&seq_stop=1337812&rettype=fasta&retmode=text" mobile_refs/WonAB.fasta 1521    # A1552VC_01233-34 (421+140 aa)
           efetch "${EUTILS}&id=CP028894.1&seq_start=268546&seq_stop=272823&rettype=fasta&retmode=text" mobile_refs/GrwAB.fasta 3850     # A1552VC_00274-75 (603+821 aa)
           efetch "${EUTILS}&id=CP028894.1&seq_start=273189&seq_stop=275145&rettype=fasta&retmode=text" mobile_refs/VcSduA.fasta 1761    # A1552VC_00276 (651 aa)
+          check_organism PQ783903.1 "Vibrio cholerae" "PLE11"
+          check_organism KC152960.1 "Vibrio cholerae" "PLE1"
+          check_organism KC152961.1 "Vibrio cholerae" "PLE2"
+          check_organism CP028894.1 "Vibrio cholerae" "defense-system source A1552"
           # Provenance manifest: accession, coords, length, source, verification.
           cat > mobile_refs/MANIFEST.tsv <<'EOF'
           file	accession	coords	length_bp	source_paper	verification

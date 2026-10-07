@@ -64,14 +64,20 @@ else
 fi
 
 # Haiti 2022 Resurgence reference
+# Strain GC-4755, clinical O1 Ogawa isolate, Port-au-Prince, Haiti, collected
+# 2022-11-10 (GHESKIO). WGS project DBBSEV000000000 (BioSample SAMN33964167):
+# 68 contigs, 4308107 bp total, organism verified V. cholerae 2026-10-07.
+# NOTE: OQ860440.1 was previously used here but is SARS-CoV-2, not V. cholerae.
 if [[ ! -f data/references/Haiti_2022_Resurgence.fasta ]]; then
-    echo "  Fetching Haiti 2022 Resurgence (OQ860440.1)..."
+    echo "  Fetching Haiti 2022 Resurgence (GC-4755, DBBSEV000000000)..."
     python3 -c "
 from urllib.request import urlopen
-url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id=OQ860440.1&rettype=fasta&retmode=text'
+ids = ','.join('DBBSEV0100000%02d' % i for i in range(1, 69))
+url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id=' + ids + '&rettype=fasta&retmode=text'
 data = urlopen(url).read().decode()
+assert data.startswith('>') and data.count('>') == 68, 'unexpected WGS fetch result'
 open('data/references/Haiti_2022_Resurgence.fasta','w').write(data)
-print('  ✅ Haiti_2022_Resurgence.fasta written')
+print('  Haiti_2022_Resurgence.fasta written')
 "
 else
     echo "  ✅ Haiti_2022_Resurgence.fasta already present"
