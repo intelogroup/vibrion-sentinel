@@ -42,6 +42,34 @@ jobs:
           echo "▶ Fetching Haiti 2022 resurgence reference..."
           curl -sL "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id=OQ860440.1&rettype=fasta&retmode=text" -o Haiti_2022_Resurgence.fasta
 
+          echo "▶ Mobile-element reference sequences (Phase 5B.3/5B.4 screens)..."
+          mkdir -p mobile_refs
+          EUTILS="https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide"
+          # PLE islands: full element genomic sequences (canonical references).
+          curl -sL "${EUTILS}&id=PQ783903.1&rettype=fasta&retmode=text" -o mobile_refs/PLE11.fasta   # Mathur et al., Nature 2026 (Rta ~80 aa verified)
+          curl -sL "${EUTILS}&id=KC152960.1&rettype=fasta&retmode=text" -o mobile_refs/PLE1.fasta    # Seed lab canonical PLE1 (Seed et al., Nature 2013)
+          curl -sL "${EUTILS}&id=KC152961.1&rettype=fasta&retmode=text" -o mobile_refs/PLE2.fasta    # Seed lab canonical PLE2 (Seed et al., Nature 2013)
+          # Defense systems: operon ranges from V. cholerae A1552 (CP028894.1),
+          # locus-tag mapping per Adams et al., Nat Microbiol 2025 (Suppl. Tables 4/6/7).
+          # GenBank annotates these as hypothetical proteins; the system
+          # assignments below are the paper's, verified against the record.
+          curl -sL "${EUTILS}&id=CP028894.1&seq_start=1336122&seq_stop=1337812&rettype=fasta&retmode=text" -o mobile_refs/WonAB.fasta    # A1552VC_01233-34 (421+140 aa)
+          curl -sL "${EUTILS}&id=CP028894.1&seq_start=268546&seq_stop=272823&rettype=fasta&retmode=text" -o mobile_refs/GrwAB.fasta    # A1552VC_00274-75 (603+821 aa)
+          curl -sL "${EUTILS}&id=CP028894.1&seq_start=273189&seq_stop=275145&rettype=fasta&retmode=text" -o mobile_refs/VcSduA.fasta   # A1552VC_00276 (651 aa)
+          for f in mobile_refs/*.fasta; do
+            head -c 1 "$f" | grep -q ">" || { echo "fasta fetch failed: $f"; exit 1; }
+          done
+          # Provenance manifest: accession, coords, length, source, verification.
+          cat > mobile_refs/MANIFEST.tsv <<'EOF'
+          file	accession	coords	length_bp	source_paper	verification
+          PLE11.fasta	PQ783903.1	full record	19209	Mathur et al., Nature 2026 (PMID 41813903)	Rta 80 aa confirmed in GenBank CDS annotation; matches paper's ~80-aa Rta
+          PLE1.fasta	KC152960.1	full record	18079	Seed et al., Nature 2013 (PLE discovery)	Canonical Seed-lab PLE1 (strain KS393); record cites the 2013 Nature paper
+          PLE2.fasta	KC152961.1	full record	18410	Seed et al., Nature 2013 (PLE discovery)	Canonical Seed-lab PLE2 (strain KS229); same deposit series as PLE1
+          WonAB.fasta	CP028894.1	1336122-1337812	1691	Adams et al., Nat Microbiol 2025 (Suppl. Table 4)	Locus tags A1552VC_01233-34 (421+140 aa); 140-aa WonB consistent with paper's short-lived toxin
+          GrwAB.fasta	CP028894.1	268546-272823	4278	Adams et al., Nat Microbiol 2025 (Suppl. Table 6)	Locus tags A1552VC_00274-75 (603+821 aa), adjacent operon; GmrSD-like Type IV REase
+          VcSduA.fasta	CP028894.1	273189-275145	1957	Adams et al., Nat Microbiol 2025 (Suppl. Table 7)	Locus tag A1552VC_00276 (651 aa); Shedu-family nuclease
+          EOF
+
           echo "▶ bwa-mem2 index..."
           bwa-mem2 index 2010EL-1786.fasta
 
@@ -66,6 +94,7 @@ jobs:
             2010EL-1786.fasta 2010EL-1786.fasta.bwt 2010EL-1786.fasta.pac \
             2010EL-1786.fasta.ann 2010EL-1786.fasta.amb 2010EL-1786.fasta.sa \
             Haiti_2022_Resurgence.fasta \
+            mobile_refs \
             kraken2_haiti_custom kraken2_serogroup
           du -sh ../sentinel-refs-v1.tar.gz
 
