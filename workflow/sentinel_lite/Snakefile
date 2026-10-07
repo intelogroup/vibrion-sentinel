@@ -63,6 +63,14 @@ REF = f"{REFDIR}/2010EL-1786.fasta"
 KRAKEN_DB = f"{REFDIR}/kraken2_haiti_custom"
 # curated, versioned with the code (not the reference bundle); see file header
 LOCI_BED = config.get("loci_bed", f"{workflow.basedir}/loci_2010EL-1786.bed")
+# Phase 5B: ICE structural segments, curated allele table, mobile elements.
+ICE_BED = f"{workflow.basedir}/ice_segments.bed"
+ALLELES_YAML = f"{workflow.basedir}/alleles.yaml"
+MOBILE_MANIFEST = config.get(
+    "mobile_elements_manifest", f"{workflow.basedir}/mobile_elements.yaml")
+# Fail-closed: a malformed manifest breaks the run instead of silently
+# skipping screens.
+_MOBILE_ELEMENTS = report_lib.load_mobile_elements(MOBILE_MANIFEST)
 
 
 rule all:
@@ -312,6 +320,88 @@ rule loci_coverage:
             out.write(header)
             for ln in rows:
                 out.write(ln + "\n")
+
+
+rule ice_segments:
+    """Phase 5B.6: per-segment coverage of the SXT/R391 ICE for structural
+    profiling (report_lib.profile_ice_segments). Same samtools-coverage
+    table format as loci_coverage."""
+    input:
+        bam=_MAP_BAM,
+    output:
+        txt=f"{OUTDIR}/05_loci/ice_segments.txt",
+    run:
+        import os
+        import subprocess
+
+        os.makedirs(f"{OUTDIR}/05_loci", exist_ok=True)
+        header = ("#rname\tstartpos\tendpos\tnumreads\tcovbases\t"
+                  "coverage\tmeandepth\tmeanbaseq\tmeanmapq\n")
+        rows = []
+        for _bed_fields, region in loci_coverage_lib.iter_bed_regions(ICE_BED):
+            r = subprocess.run(
+                ["samtools", "coverage", "-r", region, input.bam],
+                capture_output=True, text=True)
+            for ln in r.stdout.splitlines():
+                if ln.startswith("#rname") or not ln.strip():
+                    continue
+                rows.append(ln)
+        with open(output.txt, "w") as out:
+            out.write(header)
+            for ln in rows:
+                out.write(ln + "\n")
+
+
+if _MOBILE_ELEMENTS:
+    # Phase 5B.3/5B.4: coverage screen of extracted Vibrio reads against
+    # versioned mobile-element references (PLE islands, anti-phage defense
+    # systems). Only defined when the manifest lists elements; an empty
+    # manifest (default) skips this entirely and the report records
+    # mobile_elements as not_screened.
+    rule mobile_element_screen:
+        input:
+            r1=rules.extract_vibrio.output.r1,
+            r2=rules.extract_vibrio.output.r2,
+        output:
+            tsv=f"{OUTDIR}/08_mobile/mobile_elements.tsv",
+        threads: THREADS
+        run:
+            import os
+            import subprocess
+
+            os.makedirs(f"{OUTDIR}/08_mobile", exist_ok=True)
+            with open(output.tsv, "w") as out:
+                out.write("element\tbreadth_pct\tmean_depth\tcitation\n")
+                for el in _MOBILE_ELEMENTS:
+                    ref = el["ref_fasta"]
+                    bam = f"{OUTDIR}/08_mobile/{el['id']}.bam"
+                    if PLATFORM == "nanopore":
+                        map_cmd = (
+                            f"minimap2 -t {THREADS} -ax map-ont {ref} {input.r1} "
+                            f"2>/dev/null | samtools sort -o {bam} - 2>/dev/null"
+                        )
+                    else:
+                        r2 = f" {input.r2}" if PAIRED else ""
+                        map_cmd = (
+                            f"bwa-mem2 mem -t {THREADS} {ref} {input.r1}{r2} "
+                            f"2>/dev/null | samtools sort -o {bam} - 2>/dev/null"
+                        )
+                    subprocess.run(map_cmd, shell=True, check=True)
+                    cov = subprocess.run(
+                        ["samtools", "coverage", bam],
+                        capture_output=True, text=True).stdout
+                    breadth = depth = None
+                    for ln in cov.splitlines():
+                        if ln.startswith("#") or not ln.strip():
+                            continue
+                        p = ln.split("\t")
+                        breadth, depth = float(p[5]), float(p[6])
+                        break
+                    out.write(f"{el['id']}\t{breadth}\t{depth}\t{el.get('citation', '')}\n")
+
+    _MOBILE_INPUTS = {"mobile": rules.mobile_element_screen.output.tsv}
+else:
+    _MOBILE_INPUTS = {}
 
 
 rule call_variants:
@@ -602,6 +692,49 @@ def _run_report(input, output):
         },
     )
 
+    # Phase 5B: allele calls, ICE profile, mobile-element screens. All are
+    # QC-gated like the other calls: a failed sample reports
+    # not_interpretable, never results.
+    if qc_status == "fail":
+        alleles_block = {"status": "not_interpretable",
+                         "reason": "qc.status is 'fail'"}
+        ice_block = {"pattern": "indeterminate", "segments": {},
+                     "note": "qc.status is 'fail'; ICE calls not interpretable"}
+        mobile_block = {"status": "not_interpretable",
+                        "reason": "qc.status is 'fail'"}
+    else:
+        allele_table = report_lib.load_alleles(ALLELES_YAML)
+        alleles_block = report_lib.call_alleles(
+            input.vcf, input.consensus, allele_table)
+        ice_labels = report_lib.parse_loci_bed(input.ice_bed)
+        ice_calls = report_lib.call_loci(
+            input.ice, ice_labels, LOCUS_PRESENT_BREADTH, LOCUS_ABSENT_BREADTH)
+        ice_block = report_lib.profile_ice_segments(
+            {name: v["breadth_pct"] for name, v in ice_calls.items()})
+        if hasattr(input, "mobile"):
+            rows = []
+            with open(input.mobile) as _mf:
+                _mf.readline()  # header
+                for ln in _mf:
+                    p = ln.rstrip("\n").split("\t")
+                    if len(p) >= 4:
+                        rows.append({
+                            "element": p[0],
+                            "breadth_pct": float(p[1]) if p[1] != "None" else None,
+                            "mean_depth": float(p[2]) if p[2] != "None" else None,
+                            "citation": p[3],
+                        })
+            mobile_block = {
+                "status": "screened",
+                "elements": report_lib.summarize_mobile_elements(rows),
+            }
+        else:
+            mobile_block = {
+                "status": "not_screened",
+                "reason": "mobile_elements.yaml lists no elements with "
+                          "verified reference sequences",
+            }
+
     rep = {
         "pipeline": "vibrion-sentinel-lite",
         "version": report_lib.PIPELINE_VERSION,
@@ -633,6 +766,12 @@ def _run_report(input, output):
         },
         "variants": {"snps_vs_7pet": snps},
         "surveillance_loci": loci_calls,
+        # Phase 5B: curated allele observations (RUO), ICE structural
+        # pattern, mobile-element screens. None of these gate the R1/R2
+        # watch rules in scripts/watch_rules.py.
+        "alleles": alleles_block,
+        "ice_profile": ice_block,
+        "mobile_elements": mobile_block,
         "consensus_length": cons_len,
         "consensus_called_pct": round(called_pct, 2),
         "tool_versions": load_json(input.versions),
@@ -654,7 +793,11 @@ def _run_report(input, output):
                  "Consensus positions below min_site_depth are N. "
                  "If qc.status is 'fail', variants, consensus and loci "
                  "calls are not interpretable. Loci BED is provisional "
-                 "and does not yet support serogroup/biotype calls.",
+                 "and does not yet support serogroup/biotype calls. "
+                 "Allele calls (ctxB/tcpA/rtxA/hapR/vexB) are sequence-level "
+                 "observations with citations (RUO), never predictions of "
+                 "virulence, transmissibility, or clinical outcome. "
+                 "The YemVchMDRI screen runs on the assembly tier only.",
     }
 
     if TIER == "assembly":
@@ -667,6 +810,10 @@ def _run_report(input, output):
             report_lib.parse_amrfinder(input.amr),
             gate_status,
         )
+        # Phase 5B.7: YemVchMDRI gene-set screen on the AMRFinderPlus genes.
+        # Assembly tier only -- the lite tier does not run AMRFinderPlus.
+        rep["yemvchmdri"] = report_lib.plasmid_screen(
+            report_lib.parse_amrfinder(input.amr))
         with open(input.amr_version) as _f:
             rep["assembly"]["amrfinder_db_version"] = \
                 report_lib.amrfinder_db_version(_f.read())
@@ -706,13 +853,17 @@ if TIER == "assembly":
             loci=rules.loci_coverage.output.txt,
             loci_bed=LOCI_BED,
             snp_count=rules.call_variants.output.snp_count,
+            vcf=rules.call_variants.output.vcf,
             consensus=rules.consensus.output.fa,
+            ice=rules.ice_segments.output.txt,
+            ice_bed=ICE_BED,
             versions=rules.tool_versions.output.json,
             assembly_qc=rules.assembly_qc.output.json,
             mlst=rules.mlst_type.output.tsv,
             vibecheck=rules.vibecheck_lineage.output.txt,
             amr=rules.amr_scan.output.tsv,
             amr_version=rules.amr_scan.output.version,
+            **_MOBILE_INPUTS,
         output:
             json=f"{OUTDIR}/report.json",
         run:
@@ -728,8 +879,12 @@ else:
             loci=rules.loci_coverage.output.txt,
             loci_bed=LOCI_BED,
             snp_count=rules.call_variants.output.snp_count,
+            vcf=rules.call_variants.output.vcf,
             consensus=rules.consensus.output.fa,
+            ice=rules.ice_segments.output.txt,
+            ice_bed=ICE_BED,
             versions=rules.tool_versions.output.json,
+            **_MOBILE_INPUTS,
         output:
             json=f"{OUTDIR}/report.json",
         run:
