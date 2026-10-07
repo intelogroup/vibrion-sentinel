@@ -214,5 +214,54 @@ class TestBacktestAcceptance(unittest.TestCase):
         self.assertLessEqual(big["snps_max"] - big["snps_min"], 5)
 
 
+class TestPhase4Confirmation(unittest.TestCase):
+    def _consensus_dir(self, tmp, seqs):
+        d = Path(tmp) / "cons"
+        d.mkdir()
+        for acc, s in seqs.items():
+            (d / f"{acc}.fasta").write_text(f">{acc}\n{s}\n")
+        return str(d)
+
+    def test_confirmation_annotates_cluster(self):
+        import tempfile
+        rows = [row("A", "2022-10-03", snps=42), row("B", "2022-10-04", snps=45)]
+        clusters, _ = wr.detect_clusters(rows)
+        self.assertEqual(len(clusters), 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            d = self._consensus_dir(tmp, {"A": "ACGTACGT", "B": "ACGTACGA"})
+            wr.confirm_clusters_with_consensus(clusters, d, snp_tol=5)
+        c = clusters[0]
+        self.assertEqual(c["pairwise_diameter"], 1)
+        self.assertTrue(c["pairwise_confirmed"])
+        self.assertEqual(c["missing_consensus"], [])
+        self.assertIn("True pairwise diameter 1 SNPs (confirmed)",
+                      wr.format_finding(c))
+
+    def test_confirmation_flags_over_inclusion(self):
+        # Mirrors the real 2022 finding: proxy 3, true 6.
+        import tempfile
+        rows = [row("A", "2022-10-03", snps=42), row("B", "2022-10-04", snps=45)]
+        clusters, _ = wr.detect_clusters(rows)
+        with tempfile.TemporaryDirectory() as tmp:
+            d = self._consensus_dir(tmp, {"A": "A" * 8, "B": "A" * 2 + "C" * 6})
+            wr.confirm_clusters_with_consensus(clusters, d, snp_tol=5)
+        c = clusters[0]
+        self.assertEqual(c["pairwise_diameter"], 6)
+        self.assertFalse(c["pairwise_confirmed"])
+        # The alert still fires (confirmation annotates, never gates).
+        self.assertIn("MIXED", wr.format_finding(c))
+
+    def test_missing_consensus_listed(self):
+        import tempfile
+        rows = [row("A", "2022-10-03", snps=42), row("B", "2022-10-04", snps=45)]
+        clusters, _ = wr.detect_clusters(rows)
+        with tempfile.TemporaryDirectory() as tmp:
+            d = self._consensus_dir(tmp, {"A": "ACGT"})
+            wr.confirm_clusters_with_consensus(clusters, d, snp_tol=5)
+        c = clusters[0]
+        self.assertEqual(c["missing_consensus"], ["B"])
+        self.assertIsNone(c["pairwise_confirmed"])
+
+
 if __name__ == "__main__":
     unittest.main()
