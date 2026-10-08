@@ -38,10 +38,11 @@ import secrets
 from typing import Annotated, Any, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from .auth import VALID_ROLES, Actor, hash_key, make_org_dependency
+from .auth import VALID_ROLES, Actor, _bearer, hash_key, make_org_dependency
 from .config import Settings
 from .crypto import EncryptedStorage, KeyProvider
 from .db import JobDB, SupabaseError
@@ -91,6 +92,82 @@ def create_app(
     ActorDep = Annotated[Actor, Depends(require_actor)]
     get_portal_user = make_user_dependency(db)
 
+    async def _get_upload_actor(
+        request: Request,
+        credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    ) -> Actor:
+        """Actor for the TUS upload routes: API key OR portal session.
+
+        API keys keep their existing semantics (the key's org wins; any
+        `org` metadata is ignored). Portal sessions resolve the org from
+        the `org` Upload-Metadata key on POST, or from the job itself on
+        PATCH/HEAD/DELETE — membership is always re-checked, so a session
+        can never touch another org's upload.
+        """
+        if credentials is not None and credentials.scheme.lower() == "bearer":
+            try:
+                row = db.lookup_key(hash_key(credentials.credentials))
+            except SupabaseError as e:
+                raise HTTPException(status_code=502, detail=f"database error: {e}")
+            if row is None or row.get("revoked_at"):
+                raise HTTPException(
+                    status_code=401,
+                    detail="invalid API key",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            return Actor(
+                org_id=row["org_id"],
+                key_id=row["id"],
+                role=row.get("role") or "member",
+            )
+        user = get_portal_user(request)
+        if user is None:
+            raise HTTPException(status_code=401, detail="login required")
+        job_id = request.path_params.get("job_id")
+        if job_id:
+            try:
+                job = db.get_job_any(job_id)
+            except SupabaseError as e:
+                raise HTTPException(status_code=502, detail=f"database error: {e}")
+            if job is None:
+                raise _not_found()
+            try:
+                mem = db.get_org_member(user.id, job["org_id"])
+            except SupabaseError as e:
+                raise HTTPException(status_code=502, detail=f"database error: {e}")
+            if mem is None:
+                raise _not_found()
+            if mem.get("role") not in ("admin", "member"):
+                raise _forbidden()
+            return Actor(
+                org_id=job["org_id"],
+                key_id=f"session:{user.id}",
+                role=mem.get("role"),
+            )
+        try:
+            meta = parse_metadata(request.headers.get("upload-metadata"))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        org_id = (meta.get("org") or "").strip()
+        if not org_id:
+            raise HTTPException(
+                status_code=400,
+                detail="session uploads require the target org in Upload-Metadata ('org')",
+            )
+        try:
+            mem = db.get_org_member(user.id, org_id)
+        except SupabaseError as e:
+            raise HTTPException(status_code=502, detail=f"database error: {e}")
+        if mem is None:
+            raise _not_found()
+        if mem.get("role") not in ("admin", "member"):
+            raise _forbidden()
+        return Actor(
+            org_id=org_id, key_id=f"session:{user.id}", role=mem.get("role")
+        )
+
+    UploadActorDep = Annotated[Actor, Depends(_get_upload_actor)]
+
     def _forbidden(detail: str = "insufficient role for this action") -> HTTPException:
         # Within an org, role violations are 403. (Between orgs the 404
         # oracle rule still applies: _get_job_or_404 etc. filter by org.)
@@ -134,7 +211,7 @@ def create_app(
     # ------------------------------------------------------------------ tus
     @app.post("/uploads", status_code=201)
     def create_upload(
-        actor: ActorDep,
+        actor: UploadActorDep,
         request: Request,
         upload_length: Annotated[Optional[str], Header(alias="Upload-Length")] = None,
         upload_metadata: Annotated[Optional[str], Header(alias="Upload-Metadata")] = None,
@@ -192,7 +269,7 @@ def create_app(
         )
 
     @app.head("/uploads/{job_id}")
-    def upload_offset(actor: ActorDep, job_id: str) -> Response:
+    def upload_offset(actor: UploadActorDep, job_id: str) -> Response:
         _require(actor, "admin", "member")
         job = _get_job_or_404(actor.org_id, job_id)
         return Response(
@@ -207,7 +284,7 @@ def create_app(
 
     @app.patch("/uploads/{job_id}", status_code=204)
     async def append_chunk(
-        actor: ActorDep,
+        actor: UploadActorDep,
         job_id: str,
         request: Request,
         upload_offset: Annotated[Optional[str], Header(alias="Upload-Offset")] = None,
@@ -264,7 +341,7 @@ def create_app(
         )
 
     @app.delete("/uploads/{job_id}", status_code=204)
-    def cancel_upload(actor: ActorDep, job_id: str) -> Response:
+    def cancel_upload(actor: UploadActorDep, job_id: str) -> Response:
         _require(actor, "admin", "member")
         job = _get_job_or_404(actor.org_id, job_id)
         if job["status"] not in ("uploading", "queued"):
@@ -586,7 +663,9 @@ def create_app(
                 j["qc_status"] = qc.get("status")
             orgs.append({"org_id": m["org_id"], "role": m["role"], "jobs": jobs})
         return _dash_env.get_template("dashboard.html").render(
-            user_email=user.email, orgs=orgs
+            user_email=user.email,
+            orgs=orgs,
+            max_upload_bytes=settings.max_upload_bytes,
         )
 
     @app.post("/dashboard/jobs/{job_id}/retry")

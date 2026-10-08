@@ -105,6 +105,49 @@ STRINGS: dict[str, dict[str, str]] = {
         ),
         "generated_at": "Report generated",
         "no_data": "—",
+        "section_confidence": "Confidence",
+        "confidence_high": "High",
+        "confidence_provisional": "Provisional",
+        "confidence_low": "Low — do not act",
+        "confidence_operational_note": (
+            "Operational confidence tier, not a published standard."
+        ),
+        "confidence_reasons": "Reasons",
+        "reason_qc_fail": "QC failed — results are not interpretable.",
+        "reason_depth": (
+            "mean depth {depth}x is below the 30x high-confidence threshold"
+        ),
+        "reason_called": (
+            "{called}% of the consensus is called, "
+            "below the 95% high-confidence threshold"
+        ),
+        "reason_contamination": (
+            "{pct}% of reads are non-V. cholerae, "
+            "above the 1% high-confidence threshold"
+        ),
+        "section_limitations": "Limitations",
+        "limitation_1": (
+            "SNP distances reflect recent common ancestry, not who infected "
+            "whom — field epidemiology is still needed to infer transmission."
+        ),
+        "limitation_2": (
+            "No fixed SNP cutoff defines an outbreak. The ≤5 SNP / 14-day "
+            "alert rule is an operational choice, not a biological threshold."
+        ),
+        "limitation_3": (
+            "Recombination is not masked in this screen. In Haiti, small SNP "
+            "differences can reflect environmental adaptation or bottlenecks "
+            "rather than transmission."
+        ),
+        "limitation_4": (
+            "Mapping is reference-based: insertions and genes absent from the "
+            "2010EL-1786 reference are invisible here. Mobile elements and "
+            "AMR outside the core genome need assembly-based checks."
+        ),
+        "limitation_5": (
+            "Gene presence is not phenotype. AMR calls below are gene "
+            "detected / not detected only."
+        ),
     },
     "fr": {
         # DRAFT — every string below requires native-speaker review.
@@ -156,6 +199,54 @@ STRINGS: dict[str, dict[str, str]] = {
         ),
         "generated_at": "Rapport généré le",
         "no_data": "—",
+        "section_confidence": "Confiance",
+        "confidence_high": "Élevé",
+        "confidence_provisional": "Provisoire",
+        "confidence_low": "Faible — ne pas agir",
+        "confidence_operational_note": (
+            "Niveau de confiance opérationnel, pas une norme publiée."
+        ),
+        "confidence_reasons": "Motifs",
+        "reason_qc_fail": (
+            "le contrôle qualité a échoué — résultats non interprétables."
+        ),
+        "reason_depth": (
+            "la profondeur moyenne de {depth}x est sous le seuil de 30x"
+        ),
+        "reason_called": (
+            "{called} % du consensus est appelé, sous le seuil de 95 %"
+        ),
+        "reason_contamination": (
+            "{pct} % des lectures ne sont pas V. cholerae, "
+            "au-dessus du seuil de 1 %"
+        ),
+        "section_limitations": "Limites",
+        "limitation_1": (
+            "Les distances en SNP reflètent une ascendance commune récente, "
+            "pas l'identité de l'infecteur — l'épidémiologie de terrain "
+            "reste nécessaire pour inférer la transmission."
+        ),
+        "limitation_2": (
+            "Aucun seuil fixe de SNP ne définit une flambée. La règle "
+            "d'alerte ≤5 SNP / 14 jours est un choix opérationnel, pas un "
+            "seuil biologique."
+        ),
+        "limitation_3": (
+            "La recombinaison n'est pas masquée dans cet écran. En Haïti, "
+            "de petites différences de SNP peuvent refléter une adaptation "
+            "environnementale ou des goulots d'étranglement plutôt qu'une "
+            "transmission."
+        ),
+        "limitation_4": (
+            "L'alignement est basé sur une référence : les insertions et "
+            "les gènes absents de la référence 2010EL-1786 sont invisibles "
+            "ici. Les éléments mobiles et la résistance aux antimicrobiens "
+            "hors du génome cœur nécessitent des vérifications par assemblage."
+        ),
+        "limitation_5": (
+            "La présence d'un gène ne prédit pas le phénotype. Les appels "
+            "ci-dessous signifient « gène détecté / non détecté » uniquement."
+        ),
     },
     "ht": {
         # DRAFT — every string below requires native-speaker review.
@@ -207,6 +298,50 @@ STRINGS: dict[str, dict[str, str]] = {
         ),
         "generated_at": "Rapò a te pwodui",
         "no_data": "—",
+        "section_confidence": "Konfyans",
+        "confidence_high": "Wo",
+        "confidence_provisional": "Pwovizwa",
+        "confidence_low": "Fèb — pa aji",
+        "confidence_operational_note": (
+            "Nivo konfyans operasyonèl, se pa yon estanda pibliye."
+        ),
+        "confidence_reasons": "Rezon",
+        "reason_qc_fail": (
+            "kontwòl kalite a echwe — rezilta yo pa entèprete."
+        ),
+        "reason_depth": (
+            "pwofondè mwayèn {depth}x la pi ba pase papòt 30x la"
+        ),
+        "reason_called": (
+            "{called} % konsensis la rele, pi ba pase papòt 95 % la"
+        ),
+        "reason_contamination": (
+            "{pct} % lekti yo se pa V. cholerae, pi wo pase papòt 1 % la"
+        ),
+        "section_limitations": "Limit",
+        "limitation_1": (
+            "Distans SNP yo montre yon zansèt komen resan, pa ki moun ki "
+            "bay ki moun maladi a — epidemyoloji teren toujou nesesè pou "
+            "konprann transmisyon an."
+        ),
+        "limitation_2": (
+            "Okenn chif SNP fiks pa defini yon epidemi. Règ alèt ≤5 SNP / "
+            "14 jou a se yon chwa operasyonèl, se pa yon papòt byolojik."
+        ),
+        "limitation_3": (
+            "Rekonbinasyon pa kache nan egzamen sa a. An Ayiti, ti diferans "
+            "SNP yo ka reflete adaptasyon anviwònman oswa peryòd blokaj, "
+            "pa transmisyon."
+        ),
+        "limitation_4": (
+            "Aliyman an fèt pa referans: ensèsyon ak jèn ki pa nan referans "
+            "2010EL-1786 an pa parèt isit la. Eleman mobil ak rezistans "
+            "antimikwòb deyò jenom nwayo a bezwen verifikasyon pa asanblaj."
+        ),
+        "limitation_5": (
+            "Prezans yon jèn pa vle di fenotip. Apèl yo pi ba a vle di "
+            "« jèn detekte / pa detekte » sèlman."
+        ),
     },
 }
 

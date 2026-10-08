@@ -325,5 +325,98 @@ class TusTestCase(unittest.TestCase):
         self.assertEqual([j["id"] for j in jobs], [u2, u1])
 
 
+class SessionUploadTestCase(unittest.TestCase):
+    """Portal sessions (no API key) can drive the TUS upload flow."""
+
+    def setUp(self):
+        self.db = FakeDB()
+        self.storage = MemoryStorage()
+        self.settings = Settings()
+        self.app = create_app(self.db, self.storage, self.settings)
+        self.client = TestClient(self.app)
+
+    def _signup(self, client, email):
+        r = client.post(
+            "/auth/signup",
+            json={"email": email, "password": "correct-horse-99"},
+        )
+        self.assertEqual(r.status_code, 201, r.text)
+        return r.json()
+
+    def _session_create(self, client, payload, org_id, extra_meta=None):
+        meta = {
+            "org": org_id,
+            "filename": "sample.fastq.gz",
+            "platform": "illumina",
+            "tier": "lite",
+        }
+        if extra_meta:
+            meta.update(extra_meta)
+        return client.post(
+            "/uploads",
+            headers={
+                "Upload-Length": str(len(payload)),
+                "Upload-Metadata": tus.encode_metadata(meta),
+            },
+        )
+
+    def _session_chunk(self, client, uid, payload, offset=0):
+        return client.patch(
+            f"/uploads/{uid}",
+            content=payload,
+            headers={
+                "Upload-Offset": str(offset),
+                "Content-Type": "application/offset+octet-stream",
+            },
+        )
+
+    def test_session_create_and_chunk_round_trip(self):
+        body = self._signup(self.client, "ada@example.org")
+        payload = make_fastq(20)
+        r = self._session_create(self.client, payload, body["org_id"])
+        self.assertEqual(r.status_code, 201, r.text)
+        uid = r.headers["Location"].rsplit("/", 1)[-1]
+        r = self._session_chunk(self.client, uid, payload)
+        self.assertEqual(r.status_code, 204, r.text)
+        self.assertEqual(self.db.jobs[uid]["status"], "queued")
+        self.assertEqual(self.db.jobs[uid]["org_id"], body["org_id"])
+
+    def test_session_create_missing_org_is_400(self):
+        self._signup(self.client, "ada@example.org")
+        payload = make_fastq(5)
+        r = self.client.post(
+            "/uploads",
+            headers={
+                "Upload-Length": str(len(payload)),
+                "Upload-Metadata": tus.encode_metadata({"platform": "illumina"}),
+            },
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_session_cannot_create_for_other_org(self):
+        a = self._signup(self.client, "ada@example.org")
+        other = TestClient(self.app)
+        self._signup(other, "bob@example.org")
+        r = self._session_create(other, make_fastq(5), a["org_id"])
+        self.assertEqual(r.status_code, 404)
+
+    def test_session_cannot_chunk_other_org_job(self):
+        a = self._signup(self.client, "ada@example.org")
+        payload = make_fastq(5)
+        r = self._session_create(self.client, payload, a["org_id"])
+        uid = r.headers["Location"].rsplit("/", 1)[-1]
+        other = TestClient(self.app)
+        self._signup(other, "bob@example.org")
+        r = self._session_chunk(other, uid, payload)
+        self.assertEqual(r.status_code, 404)
+
+    def test_session_viewer_cannot_upload(self):
+        body = self._signup(self.client, "ada@example.org")
+        user = self.db.get_user_by_email("ada@example.org")
+        self.db.add_org_member(user["id"], body["org_id"], "viewer")
+        r = self._session_create(self.client, make_fastq(5), body["org_id"])
+        self.assertEqual(r.status_code, 403)
+
+
 if __name__ == "__main__":
     unittest.main()
