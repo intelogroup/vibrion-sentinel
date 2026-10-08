@@ -19,6 +19,14 @@
   .qc-fail-zone { filter: grayscale(1); opacity: 0.55; }
   .not-interpretable { background: #b00020; color: #fff; font-weight: 700;
                        padding: 0.5rem 1rem; margin-bottom: 1rem; }
+  .confidence { border: 2px solid; border-radius: 6px; padding: 0.75rem 1rem;
+                margin: 1.25rem 0; }
+  .confidence.high { border-color: #1e7e34; background: #eaf7ee; }
+  .confidence.provisional { border-color: #b58900; background: #fff8e1; }
+  .confidence.low { border-color: #b00020; background: #fdecea; }
+  .confidence .tier { font-size: 1.2rem; font-weight: 700; }
+  .confidence .opnote { font-size: 0.85rem; color: #555; margin-top: 0.25rem; }
+  .limitations li { margin-bottom: 0.4rem; }
   table { border-collapse: collapse; width: 100%; margin: 0.75rem 0; }
   th, td { border: 1px solid #ccc; padding: 0.4rem 0.6rem; text-align: left;
            font-size: 0.92rem; }
@@ -62,6 +70,21 @@
 <div class="not-interpretable">{{ s.not_interpretable }}</div>
 <div class="qc-fail-zone">
 {% endif %}
+
+<h2>{{ s.section_confidence }}</h2>
+<div class="confidence {{ confidence_tier }}">
+  <div class="tier">{{ confidence_label }}</div>
+  <div class="opnote">{{ s.confidence_operational_note }}</div>
+  {% if confidence_reasons %}
+  <div><strong>{{ s.confidence_reasons }}:</strong>
+    <ul>
+    {% for r in confidence_reasons %}
+      <li>{{ r }}</li>
+    {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</div>
 
 <h2>{{ s.section_sample }}</h2>
 <table class="meta">
@@ -116,6 +139,13 @@
 {% if not qc_pass %}
 </div><!-- /qc-fail-zone -->
 {% endif %}
+
+<h2>{{ s.section_limitations }}</h2>
+<ul class="limitations">
+{% for lim in limitations %}
+  <li>{{ lim }}</li>
+{% endfor %}
+</ul>
 
 <div class="footer">
   <div class="ruo">{{ s.ruo_banner }}</div>

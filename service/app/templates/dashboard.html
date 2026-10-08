@@ -27,6 +27,16 @@
   .actions form { display: inline; }
   h2 { margin-top: 2rem; }
   .empty { color: #666; font-style: italic; }
+  .upload { border: 1px solid #ccc; border-radius: 6px; padding: 1rem 1.25rem;
+            margin: 1.5rem 0; background: #fafafa; }
+  .upload h2 { margin-top: 0; }
+  .upload label { display: inline-block; margin: 0.4rem 1rem 0.4rem 0;
+                  font-size: 0.9rem; }
+  .upload select, .upload input[type=file] { font-size: 0.9rem; }
+  .upload button { margin-top: 0.6rem; padding: 0.4rem 1.2rem; }
+  #uprog { width: 100%; margin-top: 0.6rem; display: none; }
+  #ustatus { font-size: 0.9rem; color: #555; margin-top: 0.4rem; min-height: 1.2em; }
+  #ustatus.err { color: #b00020; }
 </style>
 </head>
 <body>
@@ -35,6 +45,171 @@
   <h1>Sentinel dashboard</h1>
   <div>{{ user_email }} · <a href="/auth/logout" onclick="event.preventDefault(); fetch('/auth/logout', {method:'POST'}).then(()=>location='/login')">log out</a></div>
 </header>
+
+<div class="upload">
+  <h2>Upload a sample</h2>
+  <div>
+    <label>Organization
+      <select id="uorg">
+        {% for org in orgs %}{% if org.role in ("admin", "member") %}
+        <option value="{{ org.org_id }}">{{ org.org_id }} ({{ org.role }})</option>
+        {% endif %}{% endfor %}
+      </select>
+    </label>
+    <label>Platform
+      <select id="uplatform">
+        <option value="illumina">illumina</option>
+        <option value="nanopore">nanopore</option>
+      </select>
+    </label>
+    <label>Tier
+      <select id="utier">
+        <option value="lite">lite</option>
+        <option value="assembly" id="utier-assembly" disabled>assembly (nanopore only)</option>
+      </select>
+    </label>
+    <label id="ubc-wrap" style="display:none">Basecaller
+      <select id="ubasecaller">
+        <option value="fast">fast</option>
+        <option value="hac" selected>hac</option>
+        <option value="sup">sup</option>
+      </select>
+    </label>
+  </div>
+  <div>
+    <label>FASTQ file (.fastq.gz)
+      <input type="file" id="ufile" accept=".fastq.gz,.fq.gz,.fastq,.fq">
+    </label>
+  </div>
+  <div>
+    <button id="ustart" type="button">Upload</button>
+    <button id="ucancel" type="button" disabled>Cancel</button>
+  </div>
+  <progress id="uprog" max="100" value="0"></progress>
+  <div id="ustatus"></div>
+</div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const MAX_BYTES = {{ max_upload_bytes }};
+  const CHUNK = 5 * 1024 * 1024;
+  let cancelled = false;
+  let uploadUrl = null;
+
+  const b64 = (s) => btoa(unescape(encodeURIComponent(s)));
+  const setStatus = (msg, isErr) => {
+    const el = $("ustatus");
+    el.textContent = msg;
+    el.classList.toggle("err", !!isErr);
+  };
+
+  $("uplatform").addEventListener("change", (e) => {
+    const nano = e.target.value === "nanopore";
+    $("ubc-wrap").style.display = nano ? "inline-block" : "none";
+    $("utier-assembly").disabled = !nano;
+    if (!nano) $("utier").value = "lite";
+  });
+
+  async function tusFetch(url, opts) {
+    const r = await fetch(url, Object.assign({ credentials: "same-origin" }, opts));
+    return r;
+  }
+
+  async function createUpload(file, org, platform, tier, basecaller) {
+    const meta = [
+      ["filename", file.name],
+      ["platform", platform],
+      ["tier", tier],
+      ["org", org],
+    ];
+    if (platform === "nanopore") meta.push(["basecaller_model", basecaller]);
+    const r = await tusFetch("/uploads", {
+      method: "POST",
+      headers: {
+        "Upload-Length": String(file.size),
+        "Upload-Metadata": meta.map(([k, v]) => k + " " + b64(v)).join(","),
+      },
+    });
+    if (r.status !== 201) throw new Error("create failed: " + (await r.text()));
+    return r.headers.get("Location");
+  }
+
+  async function sendChunk(url, file, offset) {
+    const end = Math.min(offset + CHUNK, file.size);
+    const r = await tusFetch(url, {
+      method: "PATCH",
+      headers: {
+        "Upload-Offset": String(offset),
+        "Content-Type": "application/offset+octet-stream",
+      },
+      body: file.slice(offset, end),
+    });
+    if (r.status === 409) {
+      const h = await tusFetch(url, { method: "HEAD" });
+      return parseInt(h.headers.get("Upload-Offset") || "0", 10);
+    }
+    if (r.status !== 204) throw new Error("chunk failed: " + (await r.text()));
+    return parseInt(r.headers.get("Upload-Offset") || String(end), 10);
+  }
+
+  $("ustart").addEventListener("click", async () => {
+    const file = $("ufile").files[0];
+    if (!file) { setStatus("Choose a FASTQ file first.", true); return; }
+    if (file.size === 0) { setStatus("File is empty.", true); return; }
+    if (file.size > MAX_BYTES) {
+      setStatus("File exceeds the " + Math.round(MAX_BYTES / 1e9) + " GB upload limit.", true);
+      return;
+    }
+    const head = new Uint8Array(await file.slice(0, 1).arrayBuffer());
+    if (head[0] !== 0x40 /* '@' */) {
+      setStatus("File does not look like FASTQ (must start with '@').", true);
+      return;
+    }
+    const org = $("uorg").value;
+    if (!org) { setStatus("No organization available for upload.", true); return; }
+    const platform = $("uplatform").value;
+    const tier = $("utier").value;
+    const basecaller = $("ubasecaller").value;
+
+    cancelled = false;
+    $("ustart").disabled = true;
+    $("ucancel").disabled = false;
+    $("uprog").style.display = "block";
+    $("uprog").value = 0;
+    setStatus("Creating upload…");
+    try {
+      uploadUrl = await createUpload(file, org, platform, tier, basecaller);
+      let offset = 0;
+      while (offset < file.size) {
+        if (cancelled) throw new Error("cancelled");
+        offset = await sendChunk(uploadUrl, file, offset);
+        $("uprog").value = Math.round((offset / file.size) * 100);
+        setStatus("Uploading… " + Math.round((offset / file.size) * 100) + "%");
+      }
+      setStatus("Upload complete — job queued.");
+      setTimeout(() => location.reload(), 1200);
+    } catch (e) {
+      setStatus("Upload failed: " + e.message, true);
+      $("ustart").disabled = false;
+    } finally {
+      $("ucancel").disabled = true;
+    }
+  });
+
+  $("ucancel").addEventListener("click", async () => {
+    cancelled = true;
+    if (uploadUrl) {
+      try { await tusFetch(uploadUrl, { method: "DELETE" }); } catch (e) { /* ignore */ }
+      uploadUrl = null;
+    }
+    $("uprog").style.display = "none";
+    setStatus("Upload cancelled.");
+    $("ustart").disabled = false;
+    $("ucancel").disabled = true;
+  });
+})();
+</script>
 
 {% for org in orgs %}
 <h2>{{ org.org_id }} <span class="role">{{ org.role }}</span></h2>

@@ -37,6 +37,49 @@ def _v(report: dict[str, Any], *path: str, default: Any = _MISSING) -> Any:
     return cur if cur not in (None, "") else default
 
 
+def _num(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fmt1(value: float) -> str:
+    return f"{value:.1f}"
+
+
+def _confidence(report: dict[str, Any], sm: dict[str, str]) -> tuple[str, list[str]]:
+    """Operational confidence tier for one sample's report.
+
+    Adapted from the Phase 5 FP/FN plan (P1 item 4) to the per-sample
+    service report: High needs QC pass + >=30x mean depth + >=95% consensus
+    called + <=1% non-V. cholerae reads. Anything below the high bar is
+    Provisional; a QC-failed (or >5% contaminated) sample is Low / do not
+    act. The tier is explicitly labeled operational, never a standard.
+    """
+    qc = report.get("qc", {})
+    qc = qc if isinstance(qc, dict) else {}
+    if str(qc.get("status", "")).lower() != "pass":
+        return "low", [sm["reason_qc_fail"]]
+
+    reasons: list[str] = []
+    depth = _num((report.get("mapping") or {}).get("mean_depth"))
+    if depth is not None and depth < 30:
+        reasons.append(sm["reason_depth"].format(depth=_fmt1(depth)))
+    called = _num(report.get("consensus_called_pct"))
+    if called is not None and called < 95:
+        reasons.append(sm["reason_called"].format(called=_fmt1(called)))
+    frac = _num((report.get("classification") or {}).get("v_cholerae_fraction"))
+    contam = (1.0 - frac) * 100.0 if frac is not None else None
+    if contam is not None and contam > 1.0:
+        reasons.append(sm["reason_contamination"].format(pct=_fmt1(contam)))
+    if not reasons:
+        return "high", []
+    if contam is not None and contam > 5.0:
+        return "low", reasons
+    return "provisional", reasons
+
+
 def build_context(
     report: dict[str, Any],
     job_id: str,
@@ -83,6 +126,8 @@ def build_context(
     except (TypeError, ValueError):
         pass
 
+    tier, tier_reasons = _confidence(report, sm)
+
     return {
         "lang": lang if lang in ("en", "fr", "ht") else "en",
         "s": sm,
@@ -101,6 +146,10 @@ def build_context(
         "basecaller_model": _v(report, "basecaller_model"),
         "qc_pass": qc_pass,
         "qc_reasons": [str(r) for r in reasons],
+        "confidence_tier": tier,
+        "confidence_label": sm[f"confidence_{tier}"],
+        "confidence_reasons": tier_reasons,
+        "limitations": [sm[f"limitation_{i}"] for i in range(1, 6)],
         "v_cholerae_reads": _v(report, "classification", "v_cholerae_reads"),
         "v_cholerae_fraction": frac,
         "mean_depth": _v(report, "mapping", "mean_depth"),

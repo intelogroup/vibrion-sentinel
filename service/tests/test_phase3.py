@@ -7,6 +7,7 @@ credentials. Run: /tmp/p3-venv/bin/python -m unittest discover -s service/tests 
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import html
 import json
@@ -143,6 +144,79 @@ class ReportRenderTestCase(unittest.TestCase):
     def test_pdf_french(self):
         pdf = render_pdf(self.rep_fail, "JOB-2", "org-a", lang="fr")
         self.assertTrue(pdf.startswith(b"%PDF"))
+
+
+# ======================================================================
+# Confidence tier + limitations footer (Phase 5 P1 items 4/5)
+# ======================================================================
+class ConfidenceTierTestCase(unittest.TestCase):
+    def setUp(self):
+        self.rep_pass = load_fixture("report_qc_pass.json")
+        self.rep_fail = load_fixture("report_qc_fail.json")
+
+    def _ctx(self, report, lang="en"):
+        return build_context(report, "JOB-1", "org-a", lang)
+
+    def _html(self, report, lang="en"):
+        return render_html(report, "JOB-1", "org-a", lang=lang)
+
+    def _high_quality(self):
+        rep = copy.deepcopy(self.rep_pass)
+        rep["mapping"]["mean_depth"] = 68.4
+        rep["consensus_called_pct"] = 96.8
+        rep["classification"]["v_cholerae_fraction"] = 0.995
+        return rep
+
+    def test_high_tier_all_bars_met(self):
+        ctx = self._ctx(self._high_quality())
+        self.assertEqual(ctx["confidence_tier"], "high")
+        self.assertEqual(ctx["confidence_reasons"], [])
+        self.assertIn("High", ctx["confidence_label"])
+
+    def test_provisional_on_low_depth(self):
+        rep = self._high_quality()
+        rep["mapping"]["mean_depth"] = 18.2
+        ctx = self._ctx(rep)
+        self.assertEqual(ctx["confidence_tier"], "provisional")
+        self.assertTrue(any("18.2x" in r for r in ctx["confidence_reasons"]))
+
+    def test_provisional_on_contamination(self):
+        # Fixture's 0.987 fraction (1.3% non-cholerae) is above the 1% bar.
+        ctx = self._ctx(self.rep_pass)
+        self.assertEqual(ctx["confidence_tier"], "provisional")
+        self.assertTrue(any("1.3%" in r for r in ctx["confidence_reasons"]))
+
+    def test_low_on_qc_fail(self):
+        ctx = self._ctx(self.rep_fail)
+        self.assertEqual(ctx["confidence_tier"], "low")
+        self.assertIn("do not act", ctx["confidence_label"].lower())
+
+    def test_low_on_heavy_contamination(self):
+        rep = self._high_quality()
+        rep["classification"]["v_cholerae_fraction"] = 0.90
+        ctx = self._ctx(rep)
+        self.assertEqual(ctx["confidence_tier"], "low")
+
+    def test_missing_metrics_never_crash(self):
+        ctx = self._ctx({"qc": {"status": "pass"}})
+        self.assertIn(ctx["confidence_tier"], ("high", "provisional", "low"))
+
+    def test_confidence_and_limitations_render_all_languages(self):
+        for lang in ("en", "fr", "ht"):
+            # Jinja autoescapes quotes; unescape like the banned-phrase test.
+            rendered = html.unescape(self._html(self.rep_pass, lang))
+            s = i18n_mod.STRINGS[lang]
+            self.assertIn(s["section_confidence"], rendered, lang)
+            self.assertIn(s["confidence_operational_note"], rendered, lang)
+            self.assertIn(s["section_limitations"], rendered, lang)
+            for i in range(1, 6):
+                self.assertIn(s[f"limitation_{i}"], rendered, f"{lang} limitation_{i}")
+
+    def test_limitations_survive_qc_fail_greyout(self):
+        # The footer is outside the greyed-out zone: it must always print.
+        html = self._html(self.rep_fail, "en")
+        self.assertIn("Limitations", html)
+        self.assertIn("operational choice, not a biological threshold", html)
 
 
 # ======================================================================
