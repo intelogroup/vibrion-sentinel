@@ -370,21 +370,26 @@ if _MOBILE_ELEMENTS:
             import subprocess
 
             os.makedirs(f"{OUTDIR}/08_mobile", exist_ok=True)
+            # Fail-closed: surface a missing/unindexed ref with its path
+            # instead of a bare CalledProcessError (the tarball is the
+            # bundle of record; ref_fasta is relative to it).
+            map_log = f"{OUTDIR}/08_mobile/mapper.log"
             with open(output.tsv, "w") as out:
                 out.write("element\tbreadth_pct\tmean_depth\tcitation\n")
                 for el in _MOBILE_ELEMENTS:
-                    ref = el["ref_fasta"]
+                    # fail-closed path+index check (report_lib.mobile_ref_path)
+                    ref = report_lib.mobile_ref_path(REFDIR, el["ref_fasta"])
                     bam = f"{OUTDIR}/08_mobile/{el['id']}.bam"
                     if PLATFORM == "nanopore":
                         map_cmd = (
                             f"minimap2 -t {THREADS} -ax map-ont {ref} {input.r1} "
-                            f"2>/dev/null | samtools sort -o {bam} - 2>/dev/null"
+                            f"2>>{map_log} | samtools sort -o {bam} - 2>/dev/null"
                         )
                     else:
                         r2 = f" {input.r2}" if PAIRED else ""
                         map_cmd = (
                             f"bwa-mem2 mem -t {THREADS} {ref} {input.r1}{r2} "
-                            f"2>/dev/null | samtools sort -o {bam} - 2>/dev/null"
+                            f"2>>{map_log} | samtools sort -o {bam} - 2>/dev/null"
                         )
                     subprocess.run(map_cmd, shell=True, check=True)
                     cov = subprocess.run(

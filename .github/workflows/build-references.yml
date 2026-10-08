@@ -138,6 +138,15 @@ jobs:
 
           echo "▶ bwa-mem2 index..."
           bwa-mem2 index 2010EL-1786.fasta
+          # The mobile_element_screen rule maps against each mobile ref with
+          # bwa-mem2 mem, which requires the index BEFORE the fasta (it opens
+          # <ref>.bwt.2bit.64 first and exits 1 without it — verified by dry
+          # test 2026-10-08). Index every mobile fasta here so the tarball
+          # ships them.
+          for f in mobile_refs/*.fasta; do
+            bwa-mem2 index "$f"
+          done
+          ls mobile_refs/
 
           echo "▶ Haiti custom kraken2 DB..."
           bash ../scripts/build_haiti_kraken_db.sh kraken2_haiti_custom 2
@@ -160,6 +169,12 @@ jobs:
           # and writes no .sa file at all -- verified against bwa-mem2 v2.2.1
           # source (FMI_search.cpp: CP_FILENAME_SUFFIX). The .0123 binary ref
           # is packaged too; harmless and keeps the bundle self-contained.
+          # NOTE: bwa-mem2 2.x writes its FM-index as .bwt.2bit.64 (not .bwt)
+          # and writes no .sa file at all -- verified against bwa-mem2 v2.2.1
+          # source (FMI_search.cpp: CP_FILENAME_SUFFIX). The .0123 binary ref
+          # is packaged too; harmless and keeps the bundle self-contained.
+          # mobile_refs/ carries each fasta plus its bwa-mem2 index files
+          # (indexed above; the mobile_element_screen rule needs them).
           tar -czf ../sentinel-refs-v1.tar.gz \
             2010EL-1786.fasta 2010EL-1786.fasta.bwt.2bit.64 2010EL-1786.fasta.pac \
             2010EL-1786.fasta.ann 2010EL-1786.fasta.amb 2010EL-1786.fasta.0123 \
