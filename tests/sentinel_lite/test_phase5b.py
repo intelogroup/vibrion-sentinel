@@ -277,5 +277,56 @@ class TestLoadMobileElements(unittest.TestCase):
             os.unlink(path)
 
 
+class TestMobileRefPath(unittest.TestCase):
+    # Regression tests for the 2026-10-08 watch incident: bwa-mem2 mem
+    # opens <ref>.bwt.2bit.64 FIRST, so a bundle without mobile indexes
+    # fails every mobile_element_screen job. The path must join the refs
+    # dir (not a bare relative path) and the index must be checked.
+
+    def _bundle(self, with_fasta=True, with_index=True):
+        d = tempfile.mkdtemp()
+        mdir = os.path.join(d, "refs", "mobile_refs")
+        os.makedirs(mdir)
+        if with_fasta:
+            open(os.path.join(mdir, "PLE11.fasta"), "w").write(">PLE11\nACGT\n")
+        if with_index:
+            open(os.path.join(mdir, "PLE11.fasta.bwt.2bit.64"), "w").write("x")
+        return d, mdir
+
+    def _rm(self, d):
+        import shutil
+        shutil.rmtree(d, ignore_errors=True)
+
+    def test_ok_joins_refdir_and_requires_index(self):
+        d, mdir = self._bundle()
+        try:
+            got = report_lib.mobile_ref_path(
+                os.path.join(d, "refs"), "mobile_refs/PLE11.fasta")
+            self.assertEqual(
+                got, os.path.join(d, "refs", "mobile_refs", "PLE11.fasta"))
+        finally:
+            self._rm(d)
+
+    def test_missing_fasta_raises(self):
+        d, mdir = self._bundle(with_fasta=False, with_index=False)
+        try:
+            with self.assertRaises(FileNotFoundError) as cm:
+                report_lib.mobile_ref_path(
+                    os.path.join(d, "refs"), "mobile_refs/PLE11.fasta")
+            self.assertIn("fasta missing", str(cm.exception))
+        finally:
+            self._rm(d)
+
+    def test_missing_index_raises(self):
+        d, mdir = self._bundle(with_fasta=True, with_index=False)
+        try:
+            with self.assertRaises(FileNotFoundError) as cm:
+                report_lib.mobile_ref_path(
+                    os.path.join(d, "refs"), "mobile_refs/PLE11.fasta")
+            self.assertIn("bwt.2bit.64", str(cm.exception))
+        finally:
+            self._rm(d)
+
+
 if __name__ == "__main__":
     unittest.main()

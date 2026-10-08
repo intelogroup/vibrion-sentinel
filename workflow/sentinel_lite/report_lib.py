@@ -509,6 +509,24 @@ def load_mobile_elements(path):
     return elements
 
 
+def mobile_ref_path(refdir, ref_fasta):
+    """Resolve a mobile-element ref_fasta (relative path inside the pinned
+    refs tarball) against the extracted refs dir. Fail-closed: raises
+    FileNotFoundError naming the exact path when the fasta or its
+    bwa-mem2 index (.bwt.2bit.64, which bwa-mem2 mem opens FIRST) is
+    missing — a broken bundle must fail loudly here, not as a bare
+    CalledProcessError with stderr swallowed (2026-10-08 watch incident).
+    """
+    import os
+    path = os.path.join(refdir, ref_fasta)
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"mobile ref fasta missing: {path}")
+    if not os.path.isfile(path + ".bwt.2bit.64"):
+        raise FileNotFoundError(
+            f"mobile ref missing bwa-mem2 index: {path}.bwt.2bit.64")
+    return path
+
+
 def _parse_vcf_alt_calls(path):
     """{(chrom, pos): (ref, alt)} for haploid ALT calls in a bcftools VCF.
 
