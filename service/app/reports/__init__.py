@@ -70,7 +70,7 @@ def _confidence(report: dict[str, Any], sm: dict[str, str]) -> tuple[str, list[s
     if called is not None and called < 95:
         reasons.append(sm["reason_called"].format(called=_fmt1(called)))
     frac = _num((report.get("classification") or {}).get("v_cholerae_fraction"))
-    contam = (1.0 - frac) * 100.0 if frac is not None else None
+    contam = round((1.0 - frac) * 100.0, 4) if frac is not None else None
     if contam is not None and contam > 1.0:
         reasons.append(sm["reason_contamination"].format(pct=_fmt1(contam)))
     if not reasons:
@@ -78,6 +78,41 @@ def _confidence(report: dict[str, Any], sm: dict[str, str]) -> tuple[str, list[s
     if contam is not None and contam > 5.0:
         return "low", reasons
     return "provisional", reasons
+
+
+# Pipeline report.json carries confidence as language-neutral reason codes;
+# the portal localizes them. Unknown codes are skipped, never guessed.
+_REASON_TEMPLATES = {
+    "qc_fail": "reason_qc_fail",
+    "depth": "reason_depth",
+    "called": "reason_called",
+    "contamination": "reason_contamination",
+}
+
+
+def _confidence_from_report(
+    report: dict[str, Any], sm: dict[str, str]
+) -> tuple[str, list[str]]:
+    """Prefer the pipeline's embedded confidence block; fall back to
+    computing the tier from QC numbers for reports that predate it."""
+    emb = report.get("confidence")
+    if isinstance(emb, dict) and emb.get("tier") in ("high", "provisional", "low"):
+        reasons: list[str] = []
+        for r in emb.get("reasons") or []:
+            if not isinstance(r, dict):
+                continue
+            key = _REASON_TEMPLATES.get(str(r.get("code", "")))
+            if key is None:
+                continue
+            try:
+                params = {
+                    k: f"{float(v):.1f}" for k, v in r.items() if k != "code"
+                }
+                reasons.append(sm[key].format(**params))
+            except (ValueError, KeyError, TypeError):
+                continue
+        return str(emb["tier"]), reasons
+    return _confidence(report, sm)
 
 
 def build_context(
@@ -126,7 +161,7 @@ def build_context(
     except (TypeError, ValueError):
         pass
 
-    tier, tier_reasons = _confidence(report, sm)
+    tier, tier_reasons = _confidence_from_report(report, sm)
 
     return {
         "lang": lang if lang in ("en", "fr", "ht") else "en",

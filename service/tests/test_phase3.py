@@ -201,6 +201,41 @@ class ConfidenceTierTestCase(unittest.TestCase):
         ctx = self._ctx({"qc": {"status": "pass"}})
         self.assertIn(ctx["confidence_tier"], ("high", "provisional", "low"))
 
+    def test_embedded_block_preferred_over_computation(self):
+        rep = self._high_quality()  # would compute "high" locally
+        rep["confidence"] = {
+            "tier": "provisional",
+            "reasons": [{"code": "depth", "depth": 18.2}],
+        }
+        ctx = self._ctx(rep)
+        self.assertEqual(ctx["confidence_tier"], "provisional")
+        self.assertTrue(any("18.2x" in r for r in ctx["confidence_reasons"]))
+
+    def test_embedded_reasons_localized_by_code(self):
+        rep = self._high_quality()
+        rep["confidence"] = {
+            "tier": "provisional",
+            "reasons": [{"code": "contamination", "pct": 2.5}],
+        }
+        ctx = self._ctx(rep, lang="fr")
+        self.assertTrue(any("2.5 %" in r for r in ctx["confidence_reasons"]))
+
+    def test_unknown_reason_code_skipped_never_guessed(self):
+        rep = self._high_quality()
+        rep["confidence"] = {
+            "tier": "high",
+            "reasons": [{"code": "something_new", "x": 1}],
+        }
+        ctx = self._ctx(rep)
+        self.assertEqual(ctx["confidence_tier"], "high")
+        self.assertEqual(ctx["confidence_reasons"], [])
+
+    def test_legacy_report_without_block_still_computed(self):
+        rep = self._high_quality()
+        self.assertNotIn("confidence", rep)
+        ctx = self._ctx(rep)
+        self.assertEqual(ctx["confidence_tier"], "high")
+
     def test_confidence_and_limitations_render_all_languages(self):
         for lang in ("en", "fr", "ht"):
             # Jinja autoescapes quotes; unescape like the banned-phrase test.

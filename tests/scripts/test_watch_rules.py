@@ -216,3 +216,48 @@ class TestBacktestAcceptance(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestConfidenceTier(unittest.TestCase):
+    def _row(self, acc, **kw):
+        r = row(acc, "2022-10-03", **kw)
+        r.setdefault("mean_depth", 68.4)
+        r.setdefault("consensus_called_pct", 96.8)
+        return r
+
+    def test_high_all_bars_met(self):
+        r = self._row("A", frac=0.995)
+        self.assertEqual(wr._confidence_tier(r), "high")
+
+    def test_provisional_on_low_depth(self):
+        r = self._row("A", frac=0.995)
+        r["mean_depth"] = 18.2
+        self.assertEqual(wr._confidence_tier(r), "provisional")
+
+    def test_low_on_qc_fail(self):
+        r = self._row("A", qc="fail")
+        self.assertEqual(wr._confidence_tier(r), "low")
+
+    def test_missing_metrics_default_high_when_qc_pass(self):
+        # Old rows without the new columns: no evidence against -> high.
+        self.assertEqual(wr._confidence_tier(row("A", "2022-10-03")), "high")
+
+    def test_r1_finding_carries_confidence(self):
+        rows = [row("OLD", "2018-06-30", snps=41),
+                self._row("NEW", snps=42, frac=0.995)]
+        f, _ = wr.detect_recurrence(rows, n_years=2)
+        self.assertIsNotNone(f)
+        self.assertEqual(f["confidence"], "high")
+        self.assertIn("[confidence: high]", wr.format_finding(f))
+
+    def test_r2_cluster_reports_worst_tier(self):
+        a = self._row("A", snps=42, frac=0.995)
+        b = self._row("B", snps=43, frac=0.995)
+        b["mean_depth"] = 12.0  # provisional member
+        rows = [a, b]
+        clusters, _ = wr.detect_clusters(rows)
+        self.assertEqual(len(clusters), 1)
+        c = clusters[0]
+        self.assertEqual(c["confidence"], "provisional")
+        self.assertEqual(c["confidence_by_accession"], {"A": "high", "B": "provisional"})
+        self.assertIn("[confidence: provisional]", wr.format_finding(c))

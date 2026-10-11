@@ -87,11 +87,46 @@ def is_haiti(row):
     return (row.get("country") or "").lower().startswith("haiti")
 
 
+def _confidence_tier(row):
+    """Operational confidence tier for a sentinel_runs row.
+
+    Mirrors report_lib.confidence_tier (the pipeline is the source of
+    truth; this is the watch-side read of the same bars from the row's
+    columns). Informational on alerts -- never gates R1/R2.
+    """
+    if str(row.get("qc_status", "")).lower() != "pass":
+        return "low"
+
+    def num(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    depth = num(row.get("mean_depth"))
+    called = num(row.get("consensus_called_pct"))
+    frac = num(row.get("v_cholerae_fraction"))
+    contam = round((1.0 - frac) * 100.0, 4) if frac is not None else None
+    bad = (
+        (depth is not None and depth < 30)
+        or (called is not None and called < 95)
+        or (contam is not None and contam > 1.0)
+    )
+    if not bad:
+        return "high"
+    if contam is not None and contam > 5.0:
+        return "low"
+    return "provisional"
+
+
+_TIER_RANK = {"low": 0, "provisional": 1, "high": 2}
+
+
 def dated_detections(rows):
     """Haiti-tier toxigenic O1 detections with parseable dates, oldest first.
 
     Returns (detections, skipped_undated). Each detection is
-    (date, accession, snps_vs_7pet).
+    (date, accession, snps_vs_7pet, confidence_tier).
     """
     dets, skipped = [], 0
     for r in rows:
@@ -101,7 +136,8 @@ def dated_detections(rows):
         if d is None:
             skipped += 1
             continue
-        dets.append((d, r["accession"], r.get("snps_vs_7pet")))
+        dets.append((d, r["accession"], r.get("snps_vs_7pet"),
+                     _confidence_tier(r)))
     dets.sort(key=lambda t: (t[0], t[1]))
     return dets, skipped
 
@@ -122,7 +158,7 @@ def detect_recurrence(rows, n_years=DEFAULT_QUIET_YEARS):
         return None, skipped
     quiet_days = int(n_years * 365)
     prev_date = dets[0][0]
-    for d, acc, snps in dets[1:]:
+    for d, acc, snps, tier in dets[1:]:
         gap = (d - prev_date).days
         if gap >= quiet_days:
             return {
@@ -133,6 +169,7 @@ def detect_recurrence(rows, n_years=DEFAULT_QUIET_YEARS):
                 "gap_years": round(gap / 365.25, 1),
                 "previous_detection": prev_date.isoformat(),
                 "snps_vs_7pet": snps,
+                "confidence": tier,
                 "dedupe_key": f"R1:haiti:{acc}",
             }, skipped
         prev_date = d
@@ -176,8 +213,8 @@ def detect_clusters(rows, snp_tol=DEFAULT_SNP_TOL, day_tol=DEFAULT_DAY_TOL):
                 union(i, j)
 
     groups = {}
-    for i, (d, acc, snps) in enumerate(dets):
-        groups.setdefault(find(i), []).append((d, acc, snps))
+    for i, (d, acc, snps, tier) in enumerate(dets):
+        groups.setdefault(find(i), []).append((d, acc, snps, tier))
     clusters = []
     for members in groups.values():
         if len(members) < 2:
@@ -186,6 +223,8 @@ def detect_clusters(rows, snp_tol=DEFAULT_SNP_TOL, day_tol=DEFAULT_DAY_TOL):
         dates = [m[0] for m in members]
         snps = [m[2] for m in members]
         accs = sorted(m[1] for m in members)
+        tiers = {m[1]: m[3] for m in members}
+        worst = min(tiers.values(), key=lambda t: _TIER_RANK[t])
         clusters.append({
             "rule": "R2",
             "accessions": accs,
@@ -194,6 +233,8 @@ def detect_clusters(rows, snp_tol=DEFAULT_SNP_TOL, day_tol=DEFAULT_DAY_TOL):
             "date_to": max(dates).isoformat(),
             "snps_min": min(snps),
             "snps_max": max(snps),
+            "confidence": worst,
+            "confidence_by_accession": tiers,
             "dedupe_key": "R2:haiti:" + "-".join(accs),
         })
     clusters.sort(key=lambda c: c["date_from"])
@@ -210,7 +251,8 @@ def fetch_rows():
     if not url or not key:
         sys.exit("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set")
     cols = ("accession,collection_date,country,priority,qc_status,snps_vs_7pet,"
-            "v_cholerae_fraction,surveillance_loci")
+            "v_cholerae_fraction,surveillance_loci,"
+            "mean_depth,consensus_called_pct")
     q = urllib.parse.urlencode({"select": cols, "order": "accession"})
     req = urllib.request.Request(
         f"{url}/rest/v1/sentinel_runs?{q}",
@@ -261,12 +303,14 @@ def format_finding(f):
     if f["rule"] == "R1":
         return (f"RECURRENCE: toxigenic O1 {f['accession']} collected "
                 f"{f['collection_date']} after {f['gap_years']} quiet years "
-                f"(previous: {f['previous_detection']}; {f['snps_vs_7pet']} SNPs vs 2010EL-1786).")
+                f"(previous: {f['previous_detection']}; {f['snps_vs_7pet']} SNPs vs 2010EL-1786) "
+                f"[confidence: {f.get('confidence', 'unknown')}].")
     c = f
     return (f"CLUSTER: {c['n']} related toxigenic O1 samples "
             f"{c['date_from']}..{c['date_to']} "
             f"({c['snps_min']}-{c['snps_max']} SNPs vs 2010EL-1786): "
-            f"{', '.join(c['accessions'])}.")
+            f"{', '.join(c['accessions'])} "
+            f"[confidence: {c.get('confidence', 'unknown')}].")
 
 
 def main():
