@@ -134,7 +134,14 @@ jobs:
                   json.dump(r, f)
           EOF
             )
-            URLS=$(python3 -c "import json; print(json.load(open('work/${ACC}/ena.json')).get('fastq_ftp') or '')")
+            URLS=""
+            # ena.json is only written when the filereport had a record; an
+            # empty (but valid) ENA response leaves LAYOUT=MISSING and no
+            # file -- reading it unconditionally crashed the whole watch step
+            # (2026-10-11: SRR5986087, poisoned every 6h run until fixed).
+            if [ -f "work/${ACC}/ena.json" ]; then
+              URLS=$(python3 -c "import json; print(json.load(open('work/${ACC}/ena.json')).get('fastq_ftp') or '')")
+            fi
           fi
           # --- 2a. ENA fastq download. Each file is size- and gzip-verified;
           # any failure drops to the SRA Toolkit fallback below. ---
