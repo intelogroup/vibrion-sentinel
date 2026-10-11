@@ -326,3 +326,45 @@ class TestEvaluateQc(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestConfidenceTier(unittest.TestCase):
+    """P1 item 4: operational confidence tier in report.json."""
+
+    def test_high_all_bars_met(self):
+        out = report_lib.confidence_tier("pass", 68.4, 96.8, 0.995)
+        self.assertEqual(out["tier"], "high")
+        self.assertEqual(out["reasons"], [])
+
+    def test_provisional_on_low_depth(self):
+        out = report_lib.confidence_tier("pass", 18.2, 96.8, 0.995)
+        self.assertEqual(out["tier"], "provisional")
+        codes = [r["code"] for r in out["reasons"]]
+        self.assertIn("depth", codes)
+        self.assertEqual(out["reasons"][codes.index("depth")]["depth"], 18.2)
+
+    def test_provisional_on_contamination(self):
+        out = report_lib.confidence_tier("pass", 68.4, 96.8, 0.987)
+        self.assertEqual(out["tier"], "provisional")
+        self.assertEqual(
+            [r["code"] for r in out["reasons"]], ["contamination"]
+        )
+
+    def test_low_on_qc_fail(self):
+        out = report_lib.confidence_tier("fail", 68.4, 96.8, 0.995)
+        self.assertEqual(out["tier"], "low")
+        self.assertEqual(out["reasons"], [{"code": "qc_fail"}])
+
+    def test_low_on_heavy_contamination(self):
+        out = report_lib.confidence_tier("pass", 68.4, 96.8, 0.90)
+        self.assertEqual(out["tier"], "low")
+
+    def test_reasons_are_language_neutral(self):
+        # Codes + numeric params only: the portal localizes, the pipeline
+        # never embeds prose.
+        out = report_lib.confidence_tier("pass", 10.0, 80.0, 0.97)
+        for r in out["reasons"]:
+            self.assertIn("code", r)
+            for k, v in r.items():
+                if k != "code":
+                    self.assertIsInstance(v, (int, float))

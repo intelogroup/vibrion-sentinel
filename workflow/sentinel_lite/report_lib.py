@@ -202,6 +202,42 @@ def evaluate_qc(mean_depth, called_pct, species_purity_pct, thresholds):
     return "pass", []
 
 
+def confidence_tier(qc_status, mean_depth, called_pct, v_cholerae_fraction):
+    """Operational confidence tier for one sample's report (P1 item 4).
+
+    Returns {"tier": ..., "reasons": [...]} where tier is one of
+    "high" | "provisional" | "low" and each reason is a structured dict
+    {"code": ..., <params>} -- the portal localizes codes via its i18n
+    catalog, so report.json stays language-neutral.
+
+    Bars (adapted from the FP/FN reduction plan to the per-sample report):
+    High needs QC pass + mean_depth >= 30 + called_pct >= 95 +
+    <=1% non-V. cholerae reads. Anything below the high bar is
+    Provisional ("cluster may split on re-sequencing"); a QC-failed --
+    or >5% contaminated -- sample is Low / do not act. The tier is an
+    operational choice, never a published standard.
+    """
+    if str(qc_status).lower() != "pass":
+        return {"tier": "low", "reasons": [{"code": "qc_fail"}]}
+    reasons = []
+    if mean_depth is not None and mean_depth < 30:
+        reasons.append({"code": "depth", "depth": round(float(mean_depth), 1)})
+    if called_pct is not None and called_pct < 95:
+        reasons.append({"code": "called", "called": round(float(called_pct), 1)})
+    contam = None
+    if v_cholerae_fraction is not None:
+        # round: float dust on the 1% boundary (e.g. 1-0.99) must not flip
+        # the tier by itself.
+        contam = round((1.0 - float(v_cholerae_fraction)) * 100.0, 4)
+        if contam > 1.0:
+            reasons.append({"code": "contamination", "pct": round(contam, 1)})
+    if not reasons:
+        return {"tier": "high", "reasons": []}
+    if contam is not None and contam > 5.0:
+        return {"tier": "low", "reasons": reasons}
+    return {"tier": "provisional", "reasons": reasons}
+
+
 # ---------------------------------------------------------------------------
 # Phase 0 (Nanopore branch): platform/tier config validation, QC defaults,
 # assembly-block parsing, tool-version collection.
@@ -507,24 +543,6 @@ def load_mobile_elements(path):
                 raise ValueError(
                     f"mobile_elements manifest {path}: element missing '{key}'")
     return elements
-
-
-def mobile_ref_path(refdir, ref_fasta):
-    """Resolve a mobile-element ref_fasta (relative path inside the pinned
-    refs tarball) against the extracted refs dir. Fail-closed: raises
-    FileNotFoundError naming the exact path when the fasta or its
-    bwa-mem2 index (.bwt.2bit.64, which bwa-mem2 mem opens FIRST) is
-    missing — a broken bundle must fail loudly here, not as a bare
-    CalledProcessError with stderr swallowed (2026-10-08 watch incident).
-    """
-    import os
-    path = os.path.join(refdir, ref_fasta)
-    if not os.path.isfile(path):
-        raise FileNotFoundError(f"mobile ref fasta missing: {path}")
-    if not os.path.isfile(path + ".bwt.2bit.64"):
-        raise FileNotFoundError(
-            f"mobile ref missing bwa-mem2 index: {path}.bwt.2bit.64")
-    return path
 
 
 def _parse_vcf_alt_calls(path):
