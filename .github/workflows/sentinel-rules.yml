@@ -35,7 +35,55 @@ jobs:
         with:
           python-version: "3.10"
 
+      - name: Screen for R2 cluster members (no alerting)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY not set -- skipping rules evaluation"
+            echo "SKIP_RULES=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          python3 scripts/watch_rules.py \
+            --quiet-years "${{ inputs.quiet_years || '2' }}" \
+            --cluster-members-out /tmp/cluster_members.txt
+
+      - name: Fetch consensuses for cluster members (R2)
+        if: env.SKIP_RULES != '1'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/consensus
+          if [ ! -s /tmp/cluster_members.txt ]; then
+            echo "no cluster members -- nothing to fetch"
+            exit 0
+          fi
+          if [ -z "${R2_BUCKET:-}" ]; then
+            echo "R2_BUCKET not set -- Phase 4 confirmation skipped (proxy only)"
+            exit 0
+          fi
+          while read -r acc; do
+            [ -n "$acc" ] || continue
+            # Provisional consensuses live under a separate prefix (kept out
+            # of the cohort phylogeny); try the main prefix first.
+            aws s3 cp "s3://${R2_BUCKET}/consensus/${acc}.fasta.gz" \
+              "/tmp/consensus/${acc}.fasta.gz" \
+              --endpoint-url "$AWS_ENDPOINT_URL" 2>/dev/null \
+            || aws s3 cp "s3://${R2_BUCKET}/consensus-provisional/${acc}.fasta.gz" \
+              "/tmp/consensus/${acc}.fasta.gz" \
+              --endpoint-url "$AWS_ENDPOINT_URL" 2>/dev/null \
+            || echo "::warning::no R2 consensus for ${acc}"
+          done < /tmp/cluster_members.txt
+          ls /tmp/consensus | wc -l
+
       - name: Evaluate recurrence/cluster rules
+        if: env.SKIP_RULES != '1'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -43,11 +91,10 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_SENTINEL_TOPIC }}
         run: |
           set -euo pipefail
-          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
-            echo "SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY not set -- skipping rules evaluation"
-            exit 0
-          fi
           ARGS=(--quiet-years "${{ inputs.quiet_years || '2' }}")
+          if [ -d /tmp/consensus ] && [ "$(ls -A /tmp/consensus 2>/dev/null)" ]; then
+            ARGS+=(--consensus-dir /tmp/consensus)
+          fi
           if [ "${{ inputs.dry_run || 'false' }}" = "true" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             ARGS+=(--dry-run)
           fi
