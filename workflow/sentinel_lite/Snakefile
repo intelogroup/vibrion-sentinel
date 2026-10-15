@@ -811,12 +811,14 @@ def _run_report(input, output):
     if TIER == "assembly":
         asm_stats = report_lib.parse_assembly_qc(input.assembly_qc)
         gate_status, gate_reasons = report_lib.assembly_qc_gate(asm_stats)
+        _mlst = report_lib.parse_mlst_result(input.mlst)
         rep["assembly"] = report_lib.build_assembly_block(
             asm_stats,
-            report_lib.parse_mlst(input.mlst),
+            _mlst["st"],
             report_lib.parse_vibecheck(input.vibecheck),
             report_lib.parse_amrfinder(input.amr),
             gate_status,
+            mlst_result=_mlst,
         )
         # Phase 5B.7: YemVchMDRI gene-set screen on the AMRFinderPlus genes.
         # Assembly tier only -- the lite tier does not run AMRFinderPlus.

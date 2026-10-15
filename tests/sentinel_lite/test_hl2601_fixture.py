@@ -14,10 +14,11 @@ through the pipeline expecting a classification. What it pins:
   * The recorded contig count (51, per NCBI assembly stats) exceeds
     the repo assembly gate ASM_MAX_CONTIGS=50: this assembly would NOT
     clear the assembly-tier gate. Recorded, not retuned.
-  * No assertion depends on PubMLST/tseemann database state (ST2040
+  * The recorded MLST row is a real tseemann-shaped row whose profile
+    parses raw (ST '-', full allele profile preserved) -- the shape
+    build_assembly_block reads as 'unassigned' when a gate passes.
+    No assertion depends on PubMLST/tseemann database state (ST2040
     exists in PubMLST now; the oracle moves, the fixture must not).
-    The recorded MLST row's tri-state reading belongs to the
-    assembly-tier change and is tested there.
 """
 import gzip
 import sys
@@ -108,6 +109,21 @@ class TestHL2601Fixture(unittest.TestCase):
         self.assertEqual(status, "fail")
         self.assertTrue(any("contig" in r for r in reasons), reasons)
         self.assertEqual(report_lib.ASM_MAX_CONTIGS, 50)
+
+    def test_recorded_mlst_row_is_unassigned_shape(self):
+        r = report_lib.parse_mlst_result(FIXTURES / "mlst.tsv")
+        self.assertTrue(r["row_present"])
+        self.assertIsNone(r["st"])
+        self.assertEqual(r["alleles"],
+                         ["51", "41", "4", "79", "72", "1", "83"])
+        # Crossed with a passing gate (synthetic stats: the gate outcome
+        # for THIS assembly is the contig test above, not this), the raw
+        # row reads as unassigned with the profile preserved.
+        block = report_lib.build_assembly_block(
+            {"length_bp": 4038120, "contigs": 2, "n50_bp": 2961102},
+            r["st"], None, [], "pass", mlst_result=r)
+        self.assertEqual(block["mlst_call"], "unassigned")
+        self.assertEqual(block["mlst_alleles"], r["alleles"])
 
 
 if __name__ == "__main__":

@@ -154,6 +154,65 @@ class TestAssemblyBlock(unittest.TestCase):
         self.assertEqual(block["amr_genes"], ["floR", "sul2"])  # deduped + sorted
         self.assertIn("Not a susceptibility prediction", block["amr_note"])
 
+    # -- mlst_call tri-state: raw TSV state x gate status ----------------
+    # mlst_st null is overloaded (unassigned profile / failed run / gate
+    # suppression); mlst_call must never be read off the ST value alone.
+
+    def _result(self, st, alleles, row_present=True, scheme="vcholerae"):
+        return {"st": st, "scheme": scheme, "alleles": alleles,
+                "row_present": row_present}
+
+    def test_mlst_call_assigned(self):
+        stats = {"length_bp": 4038120, "contigs": 2, "n50_bp": 2961102}
+        block = report_lib.build_assembly_block(
+            stats, "69", "T12", [], "pass",
+            mlst_result=self._result("69", ["7", "5", "3"]))
+        self.assertEqual(block["mlst_call"], "assigned")
+        self.assertEqual(block["mlst_st"], "69")
+        self.assertEqual(block["mlst_scheme"], "vcholerae")
+        self.assertEqual(block["mlst_alleles"], ["7", "5", "3"])
+
+    def test_mlst_call_unassigned_on_dash_with_gate_pass(self):
+        # A real tseemann row with ST '-': loci typed, profile matched
+        # no known ST (the HL2601 shape). The raw profile is preserved.
+        stats = {"length_bp": 4038120, "contigs": 2, "n50_bp": 2961102}
+        profile = ["51", "41", "4", "79", "72", "1", "83"]
+        block = report_lib.build_assembly_block(
+            stats, None, None, [], "pass",
+            mlst_result=self._result(None, profile))
+        self.assertEqual(block["mlst_call"], "unassigned")
+        self.assertIsNone(block["mlst_st"])
+        self.assertEqual(block["mlst_alleles"], profile)
+
+    def test_mlst_call_gate_fail_is_not_interpretable_even_with_st(self):
+        stats = {"length_bp": 2000000, "contigs": 120, "n50_bp": 50000}
+        block = report_lib.build_assembly_block(
+            stats, "69", "T12", [], "fail",
+            mlst_result=self._result("69", ["7", "5", "3"]))
+        self.assertEqual(block["mlst_call"], "not_interpretable")
+        self.assertIsNone(block["mlst_st"])
+        # The raw profile survives as evidence; it is not a call.
+        self.assertEqual(block["mlst_alleles"], ["7", "5", "3"])
+
+    def test_mlst_call_missing_tsv_is_not_unassigned(self):
+        # No usable TSV row (missing file / failed-run fallback) must
+        # read as not_interpretable, distinctly from unassigned.
+        stats = {"length_bp": 4038120, "contigs": 2, "n50_bp": 2961102}
+        block = report_lib.build_assembly_block(
+            stats, None, None, [], "pass",
+            mlst_result=self._result(None, [], row_present=False,
+                                     scheme=None))
+        self.assertEqual(block["mlst_call"], "not_interpretable")
+        self.assertNotEqual(block["mlst_call"], "unassigned")
+        self.assertEqual(block["mlst_alleles"], [])
+
+    def test_mlst_call_legacy_caller_without_result(self):
+        stats = {"length_bp": 4038120, "contigs": 2, "n50_bp": 2961102}
+        block = report_lib.build_assembly_block(stats, "69", "T12", [], "pass")
+        self.assertEqual(block["mlst_call"], "assigned")
+        block = report_lib.build_assembly_block(stats, None, None, [], "pass")
+        self.assertEqual(block["mlst_call"], "not_interpretable")
+
     def test_fail_gate_suppresses_calls(self):
         # A fragmented assembly must never yield lineage or AMR calls.
         stats = {"length_bp": 2000000, "contigs": 120, "n50_bp": 50000}
@@ -161,6 +220,7 @@ class TestAssemblyBlock(unittest.TestCase):
             stats, "69", "T12", ["sul2"], "fail"
         )
         self.assertIsNone(block["mlst_st"])
+        self.assertEqual(block["mlst_call"], "not_interpretable")
         self.assertIsNone(block["vibecheck_lineage"])
         self.assertEqual(block["amr_genes"], [])
         # the disclaimer is still present even when calls are suppressed
@@ -183,6 +243,52 @@ class TestParsers(unittest.TestCase):
         p = Path(self.tmp.name) / "mlst.tsv"
         write(p, "polished.fasta\t-\t-\n")
         self.assertIsNone(report_lib.parse_mlst(p))
+
+    def test_parse_mlst_result_assigned_row(self):
+        p = Path(self.tmp.name) / "mlst.tsv"
+        write(p, "polished.fasta\tvcholerae\t69\t7\t5\t3\n")
+        r = report_lib.parse_mlst_result(p)
+        self.assertEqual(r, {"st": "69", "scheme": "vcholerae",
+                             "alleles": ["7", "5", "3"], "row_present": True})
+
+    def test_parse_mlst_result_dash_row_preserves_profile(self):
+        # Raw state only: interpretation (unassigned vs not) happens in
+        # build_assembly_block, crossed with the gate. The full allele
+        # profile survives verbatim.
+        p = Path(self.tmp.name) / "mlst.tsv"
+        write(p, "HL2601.fasta\tvcholerae\t-\t51\t41\t4\t79\t72\t1\t83\n")
+        r = report_lib.parse_mlst_result(p)
+        self.assertIsNone(r["st"])
+        self.assertEqual(r["scheme"], "vcholerae")
+        self.assertEqual(r["alleles"], ["51", "41", "4", "79", "72", "1", "83"])
+        self.assertTrue(r["row_present"])
+
+    def test_parse_mlst_result_partial_profile_kept_raw(self):
+        # '-' allele entries are data (incomplete recovery), not noise:
+        # they stay in the preserved profile.
+        p = Path(self.tmp.name) / "mlst.tsv"
+        write(p, "x.fasta\tvcholerae\t-\t51\t-\t4\n")
+        r = report_lib.parse_mlst_result(p)
+        self.assertEqual(r["alleles"], ["51", "-", "4"])
+        self.assertTrue(r["row_present"])
+
+    def test_parse_mlst_result_fallback_row_is_no_row(self):
+        # The Snakefile's failure fallback ("<file>\t-\t-\n", written when
+        # the mlst run produced nothing) has no scheme: not a typing row.
+        p = Path(self.tmp.name) / "mlst.tsv"
+        write(p, "polished.fasta\t-\t-\n")
+        r = report_lib.parse_mlst_result(p)
+        self.assertFalse(r["row_present"])
+        self.assertIsNone(r["st"])
+        self.assertEqual(r["alleles"], [])
+
+    def test_parse_mlst_result_missing_and_empty_files(self):
+        r = report_lib.parse_mlst_result(Path(self.tmp.name) / "nope.tsv")
+        self.assertFalse(r["row_present"])
+        p = Path(self.tmp.name) / "empty.tsv"
+        write(p, "")
+        r = report_lib.parse_mlst_result(p)
+        self.assertFalse(r["row_present"])
 
     def test_parse_vibecheck_json(self):
         p = Path(self.tmp.name) / "vibecheck.txt"

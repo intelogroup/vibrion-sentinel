@@ -428,21 +428,50 @@ def assembly_qc_gate(stats):
     return ("fail" if reasons else "pass"), reasons
 
 
-def parse_mlst(path):
-    """ST string from tseemann/mlst TSV output (file, scheme, ST, alleles...).
-    '-' or missing -> None. Never raises on malformed input."""
+def parse_mlst_result(path):
+    """Raw tseemann/mlst TSV state: {"st", "scheme", "alleles",
+    "row_present"}. Never raises on malformed input.
+
+    This parser deliberately does NOT interpret. The bare ST column is
+    overloaded -- a '-' can mean a genuinely unassigned novel profile or
+    incomplete allele recovery -- and the Snakefile's mlst rule hides a
+    failed run behind an all-dash fallback row ("<file>\\t-\\t-\\n": no
+    scheme, no alleles) via `|| true`. Interpretation lives in
+    build_assembly_block, which crosses this raw state with the assembly
+    QC gate. row_present is True only for a plausible tseemann row: a
+    real scheme name in column 2 (the fallback row has '-' there).
+    alleles preserves the raw allele columns in scheme order, '-'
+    entries included, so a partial profile stays visible as one."""
+    empty = {"st": None, "scheme": None, "alleles": [], "row_present": False}
     try:
         with open(path) as f:
             for line in f:
                 if not line.strip():
                     continue
                 parts = line.rstrip("\n").split("\t")
-                if len(parts) >= 3 and parts[2] not in ("-", ""):
-                    return parts[2]
-                return None
+                if len(parts) < 3:
+                    return dict(empty)
+                scheme = parts[1].strip()
+                if scheme in ("-", ""):
+                    return dict(empty)
+                st = parts[2].strip()
+                return {
+                    "st": st if st not in ("-", "") else None,
+                    "scheme": scheme,
+                    "alleles": [p.strip() for p in parts[3:]],
+                    "row_present": True,
+                }
     except OSError:
-        return None
-    return None
+        pass
+    return dict(empty)
+
+
+def parse_mlst(path):
+    """ST string from tseemann/mlst TSV output (file, scheme, ST, alleles...).
+    '-' or missing -> None. Never raises on malformed input.
+    (Kept for existing callers; parse_mlst_result returns the raw TSV
+    state that build_assembly_block interprets.)"""
+    return parse_mlst_result(path)["st"]
 
 
 def parse_vibecheck(path):
@@ -494,17 +523,61 @@ def parse_amrfinder(path):
     return sorted(genes)
 
 
-def build_assembly_block(stats, mlst_st, lineage, amr_genes, gate_status):
+def build_assembly_block(stats, mlst_st, lineage, amr_genes, gate_status,
+                         mlst_result=None):
     """The report.json 'assembly' block. lineage/amr_genes are None/[]
-    unless gate_status is 'pass' -- a failing assembly never yields calls."""
+    unless gate_status is 'pass' -- a failing assembly never yields calls.
+
+    mlst_call is the tri-state typing outcome, derived from the RAW mlst
+    TSV state (parse_mlst_result, passed as mlst_result) crossed with the
+    gate -- never from the ST value alone, because mlst_st null is
+    overloaded three ways (unassigned profile; failed/hidden mlst run;
+    deliberate gate suppression at this block):
+
+      "assigned"          -- gate passed and the TSV carries an ST.
+      "unassigned"        -- gate passed and a real tseemann row (scheme
+                             present) has ST '-': the loci were typed and
+                             the profile matched no known ST in the
+                             tool's database (e.g. HL2601, whose profile
+                             matched nothing in PubMLST until the curator
+                             assigned ST2040). A distinct, reportable
+                             result -- not a negative, not missing data.
+      "not_interpretable" -- everything else: gate failed (even when the
+                             TSV carries an ST), TSV missing/empty, or
+                             the all-dash fallback row of a failed mlst
+                             run. Deliberately distinct from "unassigned".
+
+    mlst_alleles preserves the raw allele profile (scheme order, '-'
+    for unrecovered loci) whenever a real TSV row exists, on any gate
+    outcome -- it is evidence for a human reader, not a call. Scope:
+    this block exists only on the assembly tier; the lite tier has no
+    ST. Legacy callers passing only mlst_st get "assigned" when an ST
+    is present on a passing gate, else "not_interpretable"."""
+    passed = gate_status == "pass"
+    if mlst_result is None:
+        mlst_result = {
+            "st": mlst_st,
+            "scheme": None,
+            "alleles": [],
+            "row_present": mlst_st is not None,
+        }
+    if not passed or not mlst_result.get("row_present"):
+        mlst_call = "not_interpretable"
+    elif mlst_result.get("st"):
+        mlst_call = "assigned"
+    else:
+        mlst_call = "unassigned"
     block = {
         "length_bp": stats["length_bp"],
         "contigs": stats["contigs"],
         "n50_bp": stats["n50_bp"],
         "qc_gate": gate_status,
-        "mlst_st": mlst_st if gate_status == "pass" else None,
-        "vibecheck_lineage": lineage if gate_status == "pass" else None,
-        "amr_genes": sorted(set(amr_genes)) if gate_status == "pass" else [],
+        "mlst_st": mlst_st if passed else None,
+        "mlst_call": mlst_call,
+        "mlst_scheme": mlst_result.get("scheme"),
+        "mlst_alleles": list(mlst_result.get("alleles") or []),
+        "vibecheck_lineage": lineage if passed else None,
+        "amr_genes": sorted(set(amr_genes)) if passed else [],
         "amr_note": AMR_NOTE,
     }
     return block
