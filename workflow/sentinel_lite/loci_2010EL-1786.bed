@@ -57,6 +57,12 @@ CP003069.1	2687552	2688226	wbeT	.	+	aln:VC_0258(aligned span; 5' 10bp unaligned,
 CP003069.1	2688260	2689493	rfbV	.	-	ann
 # chr2
 CP003070.1	1010364	1012590	hlyA	.	+	aln:VC_A0219
+# T6SS core gene (virulence-marker line): hcp-1 from the CP003070.1 GenBank
+# annotation (/gene="hcp-1", locus_tag Vch1786_II0813, product "hcp protein"),
+# 1-based CDS 792614-793132 plus strand. Verified 2026-10-15: ATG start, TAA
+# stop, 519 bp, length % 3 == 0. chr1 carries only partial hcp fragments
+# (Vch1786_I0913/I0914, 222/330 bp); this chr2 copy is the full-length CDS.
+CP003070.1	792613	793132	hcp	.	+	ann
 # quorum sensing / efflux (Phase 5B; homology-verified, see header)
 CP003069.1	3023603	3024215	hapR	.	-	ann:Vch1786_I2895(homology-verified)
 CP003069.1	2584970	2588081	vexB	.	-	homology:Vch1786_I2444

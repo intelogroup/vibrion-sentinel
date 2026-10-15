@@ -368,21 +368,49 @@ def assembly_qc_gate(stats):
     return ("fail" if reasons else "pass"), reasons
 
 
-def parse_mlst(path):
-    """ST string from tseemann/mlst TSV output (file, scheme, ST, alleles...).
-    '-' or missing -> None. Never raises on malformed input."""
+def parse_mlst_result(path):
+    """{"st": str|None, "st_status": ...} from tseemann/mlst TSV output
+    (file, scheme, ST, allele...). Never raises on malformed input.
+
+    st_status distinguishes three outcomes the bare ST column cannot:
+      "assigned"   -- the ST column carries a known sequence type.
+      "unassigned" -- the ST column is '-' but at least one allele column
+                      was called: MLST ran and typed the loci, yet the
+                      allelic profile matches no ST in the tool's
+                      database -- a novel profile/combination (e.g.
+                      HL2601, whose profile matched nothing in PubMLST
+                      until the curator assigned ST2040). This is a
+                      result, not missing data, and must surface as one.
+      "no_data"    -- missing/malformed file, or an all-dash row (the
+                      Snakefile writes one when the mlst run itself
+                      failed), so nothing was typed at all.
+    """
     try:
         with open(path) as f:
             for line in f:
                 if not line.strip():
                     continue
                 parts = line.rstrip("\n").split("\t")
-                if len(parts) >= 3 and parts[2] not in ("-", ""):
-                    return parts[2]
-                return None
+                if len(parts) < 3:
+                    return {"st": None, "st_status": "no_data"}
+                st = parts[2].strip()
+                if st not in ("-", ""):
+                    return {"st": st, "st_status": "assigned"}
+                alleles = [p.strip() for p in parts[3:]]
+                if any(a not in ("-", "") for a in alleles):
+                    return {"st": None, "st_status": "unassigned"}
+                return {"st": None, "st_status": "no_data"}
     except OSError:
-        return None
-    return None
+        pass
+    return {"st": None, "st_status": "no_data"}
+
+
+def parse_mlst(path):
+    """ST string from tseemann/mlst TSV output (file, scheme, ST, alleles...).
+    '-' or missing -> None. Never raises on malformed input.
+    (Kept for existing callers; parse_mlst_result also reports whether a
+    '-' ST was an unassigned novel profile or no data at all.)"""
+    return parse_mlst_result(path)["st"]
 
 
 def parse_vibecheck(path):
@@ -434,17 +462,40 @@ def parse_amrfinder(path):
     return sorted(genes)
 
 
-def build_assembly_block(stats, mlst_st, lineage, amr_genes, gate_status):
+def build_assembly_block(stats, mlst_st, lineage, amr_genes, gate_status,
+                         mlst_st_status=None):
     """The report.json 'assembly' block. lineage/amr_genes are None/[]
-    unless gate_status is 'pass' -- a failing assembly never yields calls."""
+    unless gate_status is 'pass' -- a failing assembly never yields calls.
+
+    mlst_st_status (from parse_mlst_result) distinguishes an MLST run
+    that typed the loci but matched no known ST ("unassigned") from one
+    that produced nothing ("no_data"); when omitted it is derived from
+    mlst_st ("assigned" if an ST is present, else "no_data"). On a
+    passing gate the block also carries a 'classification' label, so an
+    unassigned ST is a distinct, visible result -- "V. cholerae,
+    unassigned ST" -- never a silent null indistinguishable from a
+    failed typing run. Species in the label is the pipeline's kraken
+    classification for the same sample (see the report's classification
+    block); this block only renders the typing outcome."""
+    if mlst_st_status is None:
+        mlst_st_status = "assigned" if mlst_st else "no_data"
+    passed = gate_status == "pass"
+    classification = None
+    if passed:
+        if mlst_st_status == "assigned" and mlst_st:
+            classification = f"V. cholerae, ST{mlst_st}"
+        elif mlst_st_status == "unassigned":
+            classification = "V. cholerae, unassigned ST"
     block = {
         "length_bp": stats["length_bp"],
         "contigs": stats["contigs"],
         "n50_bp": stats["n50_bp"],
         "qc_gate": gate_status,
-        "mlst_st": mlst_st if gate_status == "pass" else None,
-        "vibecheck_lineage": lineage if gate_status == "pass" else None,
-        "amr_genes": sorted(set(amr_genes)) if gate_status == "pass" else [],
+        "mlst_st": mlst_st if passed else None,
+        "st_status": mlst_st_status if passed else None,
+        "classification": classification,
+        "vibecheck_lineage": lineage if passed else None,
+        "amr_genes": sorted(set(amr_genes)) if passed else [],
         "amr_note": AMR_NOTE,
     }
     return block
@@ -827,6 +878,63 @@ def plasmid_screen(amr_genes):
             "plasmid gene set; plasmid carriage cannot be proven from "
             "short-read gene detection. " + AMR_NOTE
         ),
+    }
+
+
+# --- Virulence-marker line (ctxAB / tcpA / rtxA / hlyA / T6SS) ---------------
+
+VIRULENCE_MARKER_NOTE = (
+    "Marker presence/absence vs the 2010EL-1786 loci panel only "
+    "(mapping breadth). 'toxigenic' means the ctxAB cholera-toxin genes "
+    "were detected; it is not a clinical or virulence prediction."
+)
+
+_CTX_PAIR = ("ctxA", "ctxB")
+
+
+def _locus_call(loci_calls, name):
+    """'present'/'absent'/'partial' for a loci-panel entry, or None when
+    the locus is not in the panel at all."""
+    entry = (loci_calls or {}).get(name)
+    if not entry:
+        return None
+    return entry.get("call")
+
+
+def virulence_markers(loci_calls):
+    """Five-marker virulence line rolled up from surveillance-loci calls:
+    ctxAB (ctxA + ctxB combined), tcpA, rtxA, hlyA, and the type VI
+    secretion system (t6ss, via the hcp core-gene locus).
+
+    The call vocabulary mirrors call_loci (present / absent / partial),
+    plus not_assessed when a locus is missing from the panel. ctxAB is
+    present only when BOTH ctxA and ctxB are present and absent only
+    when both are absent -- the same both-required logic the watch
+    rules use for toxigenic calls; anything in between is partial.
+    'toxigenic' is True when ctxAB is present, False when absent, and
+    None when ctxAB is partial or not assessed. This is a reporting
+    rollup of loci calls already produced, not a new detection pass."""
+    def single(name):
+        call = _locus_call(loci_calls, name)
+        return call if call is not None else "not_assessed"
+
+    pair = [_locus_call(loci_calls, g) for g in _CTX_PAIR]
+    if any(c is None for c in pair):
+        ctxab = "not_assessed"
+    elif all(c == "present" for c in pair):
+        ctxab = "present"
+    elif all(c == "absent" for c in pair):
+        ctxab = "absent"
+    else:
+        ctxab = "partial"
+    return {
+        "ctxAB": {"call": ctxab, "loci": list(_CTX_PAIR)},
+        "tcpA": {"call": single("tcpA")},
+        "rtxA": {"call": single("rtxA")},
+        "hlyA": {"call": single("hlyA")},
+        "t6ss": {"call": single("hcp"), "locus": "hcp"},
+        "toxigenic": {"present": True, "absent": False}.get(ctxab),
+        "note": VIRULENCE_MARKER_NOTE,
     }
 
 

@@ -136,6 +136,68 @@ jobs:
           VcSduA.fasta	CP028894.1	273189-275145	1957	Adams et al., Nat Microbiol 2025 (Suppl. Table 7)	Locus tag A1552VC_00276 (651 aa); Shedu-family nuclease
           EOF
 
+          echo "▶ Strain reference: HL2601 (novel ST2040, non-O1/non-O139)..."
+          mkdir -p strain_refs
+          # GCF_059628145.1 (ASM5962814v1; GenBank GCA_059628145.1),
+          # BioProject PRJNA1479141, BioSample SAMN60942877, SRA SRR39195233.
+          # Fail-closed content checks below mirror the pre-entry
+          # verification done 2026-10-15 (full record: tests/fixtures/
+          # hl2601/README.md in the repo + strain_refs/MANIFEST.tsv here).
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+            "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/059/628/145/GCF_059628145.1_ASM5962814v1/GCF_059628145.1_ASM5962814v1_genomic.fna.gz" \
+            -o strain_refs/HL2601.fasta.gz
+          gunzip strain_refs/HL2601.fasta.gz
+          HL_TAXID=$(curl -fsSL --retry 3 --retry-delay 3 \
+            "https://api.ncbi.nlm.nih.gov/datasets/v2/genome/accession/GCF_059628145.1/dataset_report" |
+            python3 -c "import json,sys; print(json.load(sys.stdin)['reports'][0]['organism']['tax_id'])" || true)
+          if [ "$HL_TAXID" != "666" ]; then
+            echo "ERROR: HL2601 taxid '${HL_TAXID:-<none>}' != 666 (Vibrio cholerae)" >&2
+            exit 1
+          fi
+          echo "  organism ok: HL2601 (taxid 666)"
+          # Marker spot-check vs the 2010EL-1786 genes fetched above:
+          # ctxAB must be ABSENT and rtxA PRESENT (31-mer containment).
+          python3 - <<'PYEOF'
+          import sys
+          K = 31
+          COMP = str.maketrans("ACGT", "TGCA")
+          def rc(s): return s.translate(COMP)[::-1]
+          def read_fasta(p):
+              recs, name, chunks = {}, None, []
+              for line in open(p):
+                  if line.startswith(">"):
+                      if name is not None: recs[name] = "".join(chunks).upper()
+                      name = line[1:].split()[0]; chunks = []
+                  else: chunks.append(line.strip())
+              if name is not None: recs[name] = "".join(chunks).upper()
+              return recs
+          def kmers(seq):
+              out = set()
+              for i in range(len(seq) - K + 1):
+                  k = seq[i:i + K]
+                  if "N" not in k:
+                      r = rc(k); out.add(k if k < r else r)
+              return out
+          chr1 = list(read_fasta("chr1.fa").values())[0]
+          hl = read_fasta("strain_refs/HL2601.fasta")
+          total = sum(len(s) for s in hl.values())
+          if not (3800000 <= total <= 4300000):
+              sys.exit(f"ERROR: HL2601 length {total} outside 3800000-4300000")
+          gk = set()
+          for s in hl.values(): gk |= kmers(s)
+          def containment(seq):
+              g = kmers(seq); return len(g & gk) / len(g) if g else 0.0
+          ctx = containment(chr1[1041608:1042385]) + containment(chr1[1041237:1041612])
+          rtx = containment(chr1[1027142:1040744])
+          print(f"  HL2601: {total} bp; ctxAB containment {ctx:.3f} (expect ~0), rtxA {rtx:.3f} (expect >0.4)")
+          if ctx > 0.01: sys.exit("ERROR: HL2601 unexpectedly carries ctxAB")
+          if rtx < 0.4: sys.exit("ERROR: HL2601 rtxA not found")
+          PYEOF
+          cat > strain_refs/MANIFEST.tsv <<'EOF'
+          file	accession	coords	length_bp	source_paper	verification
+          HL2601.fasta	GCF_059628145.1 (GCA_059628145.1)	full assembly, 47 scaffolds	4297354	Front. Microbiol. 2026 (HL2601 novel ST2040, non-O1/non-O139)	Verified 2026-10-15 pre-entry: NCBI Datasets organism Vibrio cholerae taxid 666 (BioProject PRJNA1479141, BioSample SAMN60942877); ctxA/ctxB/tcpA absent (31-mer containment 0.000, PGAP GFF unannotated), rtxA present (0.679), hlyA present (0.821), T6SS present (hcp-2 + vasH annotated); MLST adk51 gyrB41 mdh4 metE79 pntA72 purM1 pyrC83 — all exact PubMLST allele matches, combination unassigned per the paper (curator-assigned ST2040)
+          EOF
+
           echo "▶ bwa-mem2 index..."
           bwa-mem2 index 2010EL-1786.fasta
           # The mobile_element_screen rule maps against each mobile ref with
@@ -179,6 +241,7 @@ jobs:
             2010EL-1786.fasta 2010EL-1786.fasta.bwt.2bit.64 2010EL-1786.fasta.pac \
             2010EL-1786.fasta.ann 2010EL-1786.fasta.amb 2010EL-1786.fasta.0123 \
             Haiti_2022_Resurgence.fasta \
+            strain_refs \
             mobile_refs \
             kraken2_haiti_custom kraken2_serogroup
           du -sh ../sentinel-refs-v1.tar.gz

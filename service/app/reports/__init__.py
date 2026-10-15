@@ -191,6 +191,8 @@ def build_context(
         "breadth_pct": _v(report, "mapping", "breadth_pct"),
         "snps_vs_7pet": _v(report, "variants", "snps_vs_7pet"),
         "mlst_st": assembly.get("mlst_st", _MISSING),
+        "st_status": assembly.get("st_status", _MISSING),
+        "classification": assembly.get("classification", _MISSING),
         "vibecheck_lineage": assembly.get("vibecheck_lineage", _MISSING),
         "loci": loci,
         "amr_genes": amr_rows,

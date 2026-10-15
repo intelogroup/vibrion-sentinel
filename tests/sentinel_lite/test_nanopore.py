@@ -154,6 +154,30 @@ class TestAssemblyBlock(unittest.TestCase):
         self.assertEqual(block["amr_genes"], ["floR", "sul2"])  # deduped + sorted
         self.assertIn("Not a susceptibility prediction", block["amr_note"])
 
+    def test_pass_block_classification_assigned_st(self):
+        stats = {"length_bp": 4038120, "contigs": 2, "n50_bp": 2961102}
+        block = report_lib.build_assembly_block(
+            stats, "69", "T12", [], "pass", mlst_st_status="assigned")
+        self.assertEqual(block["st_status"], "assigned")
+        self.assertEqual(block["classification"], "V. cholerae, ST69")
+
+    def test_pass_block_classification_unassigned_st(self):
+        # The HL2601 outcome: loci typed, no ST matched. The block must
+        # say so explicitly instead of a bare mlst_st null.
+        stats = {"length_bp": 4297354, "contigs": 47, "n50_bp": 324224}
+        block = report_lib.build_assembly_block(
+            stats, None, None, [], "pass", mlst_st_status="unassigned")
+        self.assertIsNone(block["mlst_st"])
+        self.assertEqual(block["st_status"], "unassigned")
+        self.assertEqual(block["classification"],
+                         "V. cholerae, unassigned ST")
+
+    def test_pass_block_classification_none_without_data(self):
+        stats = {"length_bp": 4038120, "contigs": 2, "n50_bp": 2961102}
+        block = report_lib.build_assembly_block(stats, None, None, [], "pass")
+        self.assertEqual(block["st_status"], "no_data")
+        self.assertIsNone(block["classification"])
+
     def test_fail_gate_suppresses_calls(self):
         # A fragmented assembly must never yield lineage or AMR calls.
         stats = {"length_bp": 2000000, "contigs": 120, "n50_bp": 50000}
@@ -161,6 +185,8 @@ class TestAssemblyBlock(unittest.TestCase):
             stats, "69", "T12", ["sul2"], "fail"
         )
         self.assertIsNone(block["mlst_st"])
+        self.assertIsNone(block["st_status"])
+        self.assertIsNone(block["classification"])
         self.assertIsNone(block["vibecheck_lineage"])
         self.assertEqual(block["amr_genes"], [])
         # the disclaimer is still present even when calls are suppressed
@@ -183,6 +209,32 @@ class TestParsers(unittest.TestCase):
         p = Path(self.tmp.name) / "mlst.tsv"
         write(p, "polished.fasta\t-\t-\n")
         self.assertIsNone(report_lib.parse_mlst(p))
+
+    def test_parse_mlst_result_assigned(self):
+        p = Path(self.tmp.name) / "mlst.tsv"
+        write(p, "polished.fasta\tvcholerae\t69\t7\t5\t3\n")
+        r = report_lib.parse_mlst_result(p)
+        self.assertEqual(r, {"st": "69", "st_status": "assigned"})
+
+    def test_parse_mlst_result_unassigned_novel_profile(self):
+        # ST '-' but alleles were called: MLST ran, the profile matches
+        # no known ST (the HL2601 case). A result, not missing data.
+        p = Path(self.tmp.name) / "mlst.tsv"
+        write(p, "HL2601.fasta\tvcholerae\t-\t51\t41\t4\t79\t72\t1\t83\n")
+        r = report_lib.parse_mlst_result(p)
+        self.assertEqual(r, {"st": None, "st_status": "unassigned"})
+
+    def test_parse_mlst_result_all_dash_is_no_data(self):
+        # The Snakefile's fallback row when the mlst run itself failed:
+        # nothing was typed, so this must NOT read as "unassigned".
+        p = Path(self.tmp.name) / "mlst.tsv"
+        write(p, "polished.fasta\t-\t-\n")
+        r = report_lib.parse_mlst_result(p)
+        self.assertEqual(r, {"st": None, "st_status": "no_data"})
+
+    def test_parse_mlst_result_missing_file_is_no_data(self):
+        r = report_lib.parse_mlst_result(Path(self.tmp.name) / "nope.tsv")
+        self.assertEqual(r, {"st": None, "st_status": "no_data"})
 
     def test_parse_vibecheck_json(self):
         p = Path(self.tmp.name) / "vibecheck.txt"
