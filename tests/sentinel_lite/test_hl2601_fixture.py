@@ -126,5 +126,58 @@ class TestHL2601Fixture(unittest.TestCase):
         self.assertEqual(block["mlst_alleles"], r["alleles"])
 
 
+def marker_ref_seqs():
+    seqs, name, chunks = {}, None, []
+    with open(FIXTURES / "marker_refs.fasta") as f:
+        for line in f:
+            if line.startswith(">"):
+                if name is not None:
+                    seqs[name] = "".join(chunks).upper()
+                name = line[1:].split()[0]
+                chunks = []
+            else:
+                chunks.append(line.strip())
+    if name is not None:
+        seqs[name] = "".join(chunks).upper()
+    return seqs
+
+
+class TestHL2601VasHRecord(unittest.TestCase):
+    """vasH (T6SS representative, added 2026-10-15): the verification
+    record states the measured BLAST result, and the query allele in
+    marker_refs.fasta is the curated BED row's clean CDS."""
+
+    def test_marker_refs_carry_vasH_clean_cds(self):
+        seqs = marker_ref_seqs()
+        self.assertIn("vasH", seqs)
+        vasH = seqs["vasH"]
+        self.assertEqual(len(vasH), 1593)
+        self.assertTrue(vasH.startswith("ATG"))
+        self.assertIn(vasH[-3:], ("TAA", "TAG", "TGA"))
+        self.assertEqual(len(vasH) % 3, 0)
+
+    def test_vasH_record_matches_the_curated_bed_row(self):
+        bed = (Path(__file__).parent.parent.parent / "workflow"
+               / "sentinel_lite" / "loci_2010EL-1786.bed")
+        rows = [l.split("\t") for l in bed.read_text().splitlines()
+                if l and not l.startswith("#") and l.split("\t")[3] == "vasH"]
+        self.assertEqual(len(rows), 1)
+        chrom, start, end = rows[0][0], int(rows[0][1]), int(rows[0][2])
+        self.assertEqual((chrom, start, end),
+                         ("CP003070.1", 901621, 903214))
+        self.assertEqual(end - start, len(marker_ref_seqs()["vasH"]))
+        self.assertEqual(rows[0][6].strip(), "aln:VC_A0117")
+
+    def test_manifest_records_the_vasH_verification(self):
+        row = manifest_row("genomic.fasta.gz")
+        self.assertIn("vasH", row["verification"])
+        self.assertIn("PRESENT", row["verification"])
+        self.assertIn("1.000", row["verification"])
+        refs = manifest_row("marker_refs.fasta")
+        self.assertIn("vasH CP003070.1:901622-903214", refs["coords"])
+        total = sum(len(s) for s in marker_ref_seqs().values())
+        self.assertEqual(int(refs["length_bp"]), total)
+
+
 if __name__ == "__main__":
     unittest.main()

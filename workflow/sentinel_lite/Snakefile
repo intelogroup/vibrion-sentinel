@@ -771,8 +771,9 @@ def _run_report(input, output):
         },
         "variants": {"snps_vs_7pet": snps},
         "surveillance_loci": loci_calls,
-        # Reference-similarity view grouping four of the loci calls
-        # above (ctxA, tcpA, rtxA, hlyA). Grouping only, no new screen.
+        # Reference-similarity view grouping five of the loci calls
+        # above (ctxA, tcpA, rtxA, hlyA, vasH-as-T6SS). Grouping
+        # only, no new screen.
         "reference_markers": report_lib.reference_marker_panel(loci_calls),
         # Phase 5B: curated allele observations (RUO), ICE structural
         # pattern, mobile-element screens. None of these gate the R1/R2

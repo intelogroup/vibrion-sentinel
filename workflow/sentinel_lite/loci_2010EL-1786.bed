@@ -23,6 +23,23 @@
 #     the minus strand (1-based 2584971-2588081), translating to a
 #     1036-aa protein identical to C6706 VexB (NCBI protein QPC53479.1);
 #     annotated as Vch1786_I2444 (conserved hypothetical protein).
+#   - vasH (2026-10-15): T6SS representative locus. 2010EL-1786
+#     annotates Vch1786_II0911 only as "sigma-54 dependent
+#     transcriptional regulator" (no /gene name). Identified as the
+#     T6SS main cluster's sigma-54 activator by cluster position on
+#     chr2 (between VasG, Vch1786_II0910, and VasI, Vch1786_II0912),
+#     by the NtrC-family ATPase signature (GETGTGKE) in its
+#     translation, and by alignment: the N16961 ortholog VC_A0117 CDS
+#     aligns full-length at 100% identity (1593 bp) and the 530-aa
+#     translations are identical. Start/stop verified: ATG/TGA,
+#     1593 bp, length % 3 == 0 (1-based 901622-903214, plus strand).
+#     Why vasH represents the T6SS: it is single-copy, essential for
+#     T6SS transcription, and specific to the system. hcp was
+#     rejected as the representative: it is multi-copy (main +
+#     auxiliary clusters), so no single interval is unambiguous, and
+#     hcp-like sequence occurs in prophage elements. A vasH call is
+#     reference-like vasH sequence only -- not proof of an intact or
+#     functional T6SS.
 #     Weng et al., PLOS Pathog 2026: VexB couples MDR with hypervirulence.
 #   - hapR: not annotated as a named CDS in N16961 or 2010EL-1786, and
 #     presence/absence cannot detect its known loss-of-function alleles;
@@ -57,6 +74,8 @@ CP003069.1	2687552	2688226	wbeT	.	+	aln:VC_0258(aligned span; 5' 10bp unaligned,
 CP003069.1	2688260	2689493	rfbV	.	-	ann
 # chr2
 CP003070.1	1010364	1012590	hlyA	.	+	aln:VC_A0219
+# T6SS main cluster (chr2; vasH is the representative locus, see header)
+CP003070.1	901621	903214	vasH	.	+	aln:VC_A0117
 # quorum sensing / efflux (Phase 5B; homology-verified, see header)
 CP003069.1	3023603	3024215	hapR	.	-	ann:Vch1786_I2895(homology-verified)
 CP003069.1	2584970	2588081	vexB	.	-	homology:Vch1786_I2444

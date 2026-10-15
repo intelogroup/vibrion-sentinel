@@ -965,7 +965,14 @@ def plasmid_screen(amr_genes):
 
 # --- Reference-similarity marker panel (view over surveillance loci) ---------
 
-REFERENCE_MARKERS = ("ctxA", "tcpA", "rtxA", "hlyA")
+REFERENCE_MARKERS = ("ctxA", "tcpA", "rtxA", "hlyA", "vasH")
+
+# Display labels where the bare locus name would misstate what the
+# panel measures: vasH is the panel's single representative locus for
+# the type VI secretion system (see the loci BED header for the
+# curation), so its entry is rendered as the system it stands for with
+# the locus named -- never as a bare "T6SS" call.
+REFERENCE_MARKER_LABELS = {"vasH": "T6SS (vasH)"}
 
 REFERENCE_MARKERS_NOTE = (
     "Presence/absence is mapping breadth against the O1 2010EL-1786 "
@@ -985,18 +992,22 @@ def _locus_call(loci_calls, name):
 
 
 def reference_marker_panel(loci_calls):
-    """Named view grouping four surveillance-loci calls (ctxA, tcpA,
-    rtxA, hlyA) that call_loci already produced -- a reporting grouping
-    in the lite-tier report, not a new screen and not an assembly-tier
-    addition. Calls pass through unchanged (present / absent /
-    partial); a locus missing from the panel reads not_assessed. The
-    semantics are the loci BED's own -- mapping breadth vs the
-    2010EL-1786 allele -- so the block is labeled reference-similarity
-    and the caveat note travels with it wherever it is rendered."""
+    """Named view grouping five surveillance-loci calls (ctxA, tcpA,
+    rtxA, hlyA, vasH) that call_loci already produced -- a reporting
+    grouping in the lite-tier report, not a new screen and not an
+    assembly-tier addition. Calls pass through unchanged (present /
+    absent / partial); a locus missing from the panel reads
+    not_assessed. vasH stands for the type VI secretion system as its
+    single representative locus and is rendered "T6SS (vasH)" (see
+    REFERENCE_MARKER_LABELS). The semantics are the loci BED's own --
+    mapping breadth vs the 2010EL-1786 allele -- so the block is
+    labeled reference-similarity and the caveat note travels with it
+    wherever it is rendered."""
     markers = {}
     for name in REFERENCE_MARKERS:
         call = _locus_call(loci_calls, name)
-        markers[name] = call if call is not None else "not_assessed"
+        label = REFERENCE_MARKER_LABELS.get(name, name)
+        markers[label] = call if call is not None else "not_assessed"
     return {
         "markers": markers,
         "basis": "reference_similarity:2010EL-1786",
