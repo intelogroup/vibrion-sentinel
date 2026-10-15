@@ -1,0 +1,54 @@
+# Expectations for the HL2601 lite-tier run (SRR39195233).
+#
+# The strain: V. cholerae HL2601, non-O1/non-O139, from a Xiamen
+# bloodstream infection (Front. Microbiol. 2026; BioProject
+# PRJNA1479141). Its deposited assembly (GCF_059628145.1) was verified
+# content-first -- see tests/fixtures/hl2601/MANIFEST.tsv: ctxAB and
+# tcpA absent, rtxA/hlyA present, MLST profile novel (curator ST2040).
+#
+# This cohort is the lite-tier end of that record: the same strain from
+# its READS, through the pipeline path that actually runs in
+# production. Each entry is something the lite report measures, chosen
+# to correspond to the published/verified description:
+#   - species gate passes (it is V. cholerae, taxid 666);
+#   - ctxA / tcpA / wbeT absent (no cholera-toxin or TCP-island loci,
+#     and no O1 antigen locus -- the non-pandemic pattern);
+#   - SNP distance to the 7PET reference (2010EL-1786) is LARGE --
+#     a non-7PET lineage sits far outside the 2022 Haiti cohort's
+#     <=400-median envelope (cohorts/backtest-2022.expect.yaml). The
+#     1000 floor is the same operational bar the report's pattern
+#     label uses (report_lib.NONPANDEMIC_MIN_SNPS_VS_7PET).
+#
+# Evaluate once the run has been processed:
+#   python3 scripts/backtest_report.py --expect cohorts/hl2601.expect.yaml \
+#       --results-dir <dir with SRR39195233/report.json>
+# (or --supabase). Until then this file is an expectation on record,
+# not a gate result.
+
+cohort: hl2601
+manifest: cohorts/hl2601.tsv
+
+qc:
+  # Single published clinical isolate, deliberately sequenced: its
+  # lite run must clear QC (species gate included). A failure indicts
+  # our pipeline, not the data.
+  min_pass_rate: 1.0
+
+loci_absent:
+  # Fraction of QC-pass samples in which each locus may be called
+  # present. Zero tolerance: any 'present' call here contradicts the
+  # verified assembly record and is a pipeline finding.
+  ctxA: 0.0
+  tcpA: 0.0
+  wbeT: 0.0
+
+snps_vs_7pet:
+  # "Far from 7PET" as a floor, the mirror of backtest-2022's ceiling.
+  min_median: 1000
+
+notes: >
+  A failure here is a finding about the pipeline and must be reported
+  as such, not silently retuned until it passes. Absence expectations
+  use the loci_absent check and the SNP floor uses snps_vs_7pet
+  min_median; both were added to scripts/backtest_report.py with this
+  cohort, mirroring the existing loci_present / max_median checks.

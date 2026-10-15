@@ -9,10 +9,11 @@ ST2040. BioProject PRJNA1479141, BioSample SAMN60942877, SRA SRR39195233.
 
 HL2601 exposed a typing-outcome gap: a species-confirmed genome whose
 MLST profile matches no known ST surfaced as a bare `mlst_st: null`,
-indistinguishable from a failed typing run. The fix lives in the
-assembly tier's tri-state `mlst_call` (assigned / unassigned /
-not_interpretable, derived from the raw MLST TSV crossed with the QC
-gate) and its portal rendering.
+indistinguishable from a failed typing run. The response has two
+parts: a lite-tier pattern label for non-pandemic V. cholerae (the
+production watch path), and an assembly-tier tri-state typing outcome
+(`mlst_call`: assigned / unassigned / not_interpretable, derived from
+the raw MLST TSV crossed with the QC gate) with portal rendering.
 
 This directory is a **verification record and test fixture only**. The
 assembly is never a pipeline reference: no production path accepts a

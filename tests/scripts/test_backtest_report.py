@@ -152,6 +152,57 @@ class TestEvaluateChecks(unittest.TestCase):
         self.assertIn("(0/1)", obs)
         self.assertFalse(ok)
 
+    def test_locus_absent_zero_tolerance(self):
+        # hl2601-style: a locus verified absent must not be called
+        # present in ANY QC-pass sample.
+        reports = [
+            self.report("pass", loci={"ctxA": {"call": "absent"}}),
+            self.report("pass", loci={"ctxA": {"call": "present"}}),
+        ]
+        exp = {"qc": {"min_pass_rate": 0.0}, "loci_absent": {"ctxA": 0.0}}
+        checks = backtest_report.evaluate_checks(reports, exp)
+        obs, want, ok = self.get_check(checks, "locus ctxA absent")
+        self.assertIn("0.50", obs)
+        self.assertIn("(1/2)", obs)
+        self.assertFalse(ok)
+
+    def test_locus_absent_passes_when_never_present(self):
+        reports = [
+            self.report("pass", loci={"tcpA": {"call": "absent"}}),
+            # partial is not present; a missing locus is not present
+            self.report("pass", loci={"tcpA": {"call": "partial"}}),
+            self.report("pass", loci={}),
+        ]
+        exp = {"qc": {"min_pass_rate": 0.0}, "loci_absent": {"tcpA": 0.0}}
+        checks = backtest_report.evaluate_checks(reports, exp)
+        _, _, ok = self.get_check(checks, "locus tcpA absent")
+        self.assertTrue(ok)
+
+    def test_snps_min_median_floor(self):
+        # The mirror of max_median: a non-7PET cohort must sit FAR from
+        # the reference, so the median has a floor, not a ceiling.
+        far = [self.report("pass", snps=25000)]
+        exp = {"qc": {"min_pass_rate": 0.0},
+               "snps_vs_7pet": {"min_median": 1000}}
+        checks = backtest_report.evaluate_checks(far, exp)
+        _, want, ok = self.get_check(checks, "snps median")
+        self.assertIn(">= 1000", want)
+        self.assertTrue(ok)
+        near = [self.report("pass", snps=120)]
+        checks = backtest_report.evaluate_checks(near, exp)
+        _, _, ok = self.get_check(checks, "snps median")
+        self.assertFalse(ok)
+
+    def test_real_hl2601_expect_file_parses(self):
+        real = (Path(__file__).parent.parent.parent
+                / "cohorts" / "hl2601.expect.yaml")
+        d = backtest_report.load_expect(real)
+        self.assertEqual(d["cohort"], "hl2601")
+        self.assertEqual(d["manifest"], "cohorts/hl2601.tsv")
+        self.assertEqual(d["qc"]["min_pass_rate"], 1.0)
+        self.assertEqual(set(d["loci_absent"]), {"ctxA", "tcpA", "wbeT"})
+        self.assertEqual(d["snps_vs_7pet"]["min_median"], 1000)
+
     def test_snps_median_and_iqr_with_fewer_than_four_samples(self):
         # statistics.quantiles needs >=4 points; below that this falls
         # back to max-min as the spread, per the code's own comment

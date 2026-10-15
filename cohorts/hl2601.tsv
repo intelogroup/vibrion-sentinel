@@ -1,0 +1,10 @@
+# cohort: hl2601
+# source: NCBI SRA run SRR39195233 (BioProject PRJNA1479141, BioSample
+# SAMN60942877), V. cholerae HL2601, Xiamen, China (Front. Microbiol. 2026).
+# Metadata verified 2026-10-15 via NCBI eutils (esummary/efetch, db=sra +
+# db=biosample): ILLUMINA, WGS GENOMIC PAIRED, 7,828,854 spots,
+# 2,348,656,200 bases, first public 2026-06-17. collection_date is not
+# published with the run record and is left blank rather than guessed.
+# runs: 1
+run_accession	sample_accession	study_accession	country	collection_date	first_public	instrument_platform	library_strategy	read_count
+SRR39195233	SAMN60942877	PRJNA1479141	China		2026-06-17	ILLUMINA	WGS	7828854

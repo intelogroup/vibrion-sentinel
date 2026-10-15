@@ -811,14 +811,12 @@ def _run_report(input, output):
     if TIER == "assembly":
         asm_stats = report_lib.parse_assembly_qc(input.assembly_qc)
         gate_status, gate_reasons = report_lib.assembly_qc_gate(asm_stats)
-        _mlst = report_lib.parse_mlst_result(input.mlst)
         rep["assembly"] = report_lib.build_assembly_block(
             asm_stats,
-            _mlst["st"],
+            report_lib.parse_mlst(input.mlst),
             report_lib.parse_vibecheck(input.vibecheck),
             report_lib.parse_amrfinder(input.amr),
             gate_status,
-            mlst_result=_mlst,
         )
         # Phase 5B.7: YemVchMDRI gene-set screen on the AMRFinderPlus genes.
         # Assembly tier only -- the lite tier does not run AMRFinderPlus.
@@ -849,6 +847,11 @@ def _run_report(input, output):
     # localizes reason codes, the watch alerts carry the tier.
     rep["confidence"] = report_lib.confidence_tier(
         qc_status, mean_depth, called_pct, v_cholerae_fraction)
+
+    # Strain pattern label (non-pandemic V. cholerae), computed from the
+    # final QC status, the loci calls and the SNP distance -- signals
+    # already in this report. Beside qc/confidence by convention.
+    rep["pattern"] = report_lib.strain_pattern(qc_status, loci_calls, snps)
 
     os.makedirs(OUTDIR, exist_ok=True)
     with open(output.json, "w") as f:

@@ -105,9 +105,10 @@ def from_supabase(accs):
 def evaluate_checks(reports, exp):
     """[(name, observed_str, expected_str, passed_bool), ...] for one
     cohort's reports against its expectations dict. Pulled out of main()
-    so the check math (QC pass rate, locus-presence fraction, SNP
-    median/IQR) can be tested without report.json fixtures on disk and
-    without argparse/sys.exit in the way.
+    so the check math (QC pass rate, locus-presence fraction,
+    locus-absence fraction, SNP median/IQR with max and min bounds) can
+    be tested without report.json fixtures on disk and without
+    argparse/sys.exit in the way.
 
     reports: list of report.json dicts (already loaded).
     exp: the dict load_expect() returns.
@@ -134,6 +135,16 @@ def evaluate_checks(reports, exp):
             f"locus {locus} present", f"{frac:.2f} ({present}/{len(passed)})",
             f">= {min_frac}", frac >= min_frac))
 
+    for locus, max_frac in (exp.get("loci_absent") or {}).items():
+        present = sum(
+            1 for r in passed
+            if (r.get("surveillance_loci", {}).get(locus, {}) or {}).get("call")
+            == "present")
+        frac = present / len(passed)
+        checks.append((
+            f"locus {locus} absent", f"{frac:.2f} ({present}/{len(passed)})",
+            f"<= {max_frac}", frac <= max_frac))
+
     snps = sorted(r.get("variants", {}).get("snps_vs_7pet", 0) for r in passed)
     se = exp.get("snps_vs_7pet") or {}
     if snps:
@@ -146,6 +157,9 @@ def evaluate_checks(reports, exp):
         if "max_median" in se:
             checks.append(("snps median", f"{med:g}",
                            f"<= {se['max_median']}", med <= se["max_median"]))
+        if "min_median" in se:
+            checks.append(("snps median", f"{med:g}",
+                           f">= {se['min_median']}", med >= se["min_median"]))
         if "max_iqr" in se:
             checks.append((f"snps spread (IQR, n={len(snps)})", f"{iqr:g}",
                            f"<= {se['max_iqr']}", iqr <= se["max_iqr"]))

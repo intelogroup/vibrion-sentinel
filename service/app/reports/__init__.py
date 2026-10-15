@@ -163,28 +163,6 @@ def build_context(
 
     tier, tier_reasons = _confidence_from_report(report, sm)
 
-    # MLST tri-state (assembly tier). mlst_call is the report's typing
-    # outcome; the ST value alone is never rendered as the outcome,
-    # because a missing ST is ambiguous (unassigned profile vs a typing
-    # run that produced nothing). Legacy reports without mlst_call fall
-    # back to the bare ST value, as before.
-    mlst_call = str(assembly.get("mlst_call") or "").lower()
-    mlst_st_val = assembly.get("mlst_st")
-    if mlst_call == "assigned" and mlst_st_val not in (None, ""):
-        mlst_display = f"ST{mlst_st_val}"
-    elif mlst_call == "unassigned":
-        mlst_display = sm["mlst_unassigned"]
-    elif mlst_call == "not_interpretable":
-        mlst_display = sm["mlst_not_interpretable"]
-    elif mlst_st_val not in (None, ""):
-        mlst_display = str(mlst_st_val)
-    else:
-        mlst_display = _MISSING
-    mlst_alleles = assembly.get("mlst_alleles") or []
-    mlst_profile = (
-        "-".join(str(a) for a in mlst_alleles) if mlst_alleles else ""
-    )
-
     return {
         "lang": lang if lang in ("en", "fr", "ht") else "en",
         "s": sm,
@@ -212,9 +190,7 @@ def build_context(
         "mean_depth": _v(report, "mapping", "mean_depth"),
         "breadth_pct": _v(report, "mapping", "breadth_pct"),
         "snps_vs_7pet": _v(report, "variants", "snps_vs_7pet"),
-        "mlst_st": mlst_display,
-        "mlst_call": mlst_call or _MISSING,
-        "mlst_profile": mlst_profile,
+        "mlst_st": assembly.get("mlst_st", _MISSING),
         "vibecheck_lineage": assembly.get("vibecheck_lineage", _MISSING),
         "loci": loci,
         "amr_genes": amr_rows,
