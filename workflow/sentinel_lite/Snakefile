@@ -771,9 +771,9 @@ def _run_report(input, output):
         },
         "variants": {"snps_vs_7pet": snps},
         "surveillance_loci": loci_calls,
-        # Five-marker rollup of the loci calls above (ctxAB, tcpA, rtxA,
-        # hlyA, T6SS via hcp) + toxigenic flag. Reporting only.
-        "virulence_markers": report_lib.virulence_markers(loci_calls),
+        # Reference-similarity view grouping four of the loci calls
+        # above (ctxA, tcpA, rtxA, hlyA). Grouping only, no new screen.
+        "reference_markers": report_lib.reference_marker_panel(loci_calls),
         # Phase 5B: curated allele observations (RUO), ICE structural
         # pattern, mobile-element screens. None of these gate the R1/R2
         # watch rules in scripts/watch_rules.py.
@@ -818,7 +818,7 @@ def _run_report(input, output):
             report_lib.parse_vibecheck(input.vibecheck),
             report_lib.parse_amrfinder(input.amr),
             gate_status,
-            mlst_st_status=_mlst["st_status"],
+            mlst_result=_mlst,
         )
         # Phase 5B.7: YemVchMDRI gene-set screen on the AMRFinderPlus genes.
         # Assembly tier only -- the lite tier does not run AMRFinderPlus.

@@ -369,22 +369,20 @@ def assembly_qc_gate(stats):
 
 
 def parse_mlst_result(path):
-    """{"st": str|None, "st_status": ...} from tseemann/mlst TSV output
-    (file, scheme, ST, allele...). Never raises on malformed input.
+    """Raw tseemann/mlst TSV state: {"st", "scheme", "alleles",
+    "row_present"}. Never raises on malformed input.
 
-    st_status distinguishes three outcomes the bare ST column cannot:
-      "assigned"   -- the ST column carries a known sequence type.
-      "unassigned" -- the ST column is '-' but at least one allele column
-                      was called: MLST ran and typed the loci, yet the
-                      allelic profile matches no ST in the tool's
-                      database -- a novel profile/combination (e.g.
-                      HL2601, whose profile matched nothing in PubMLST
-                      until the curator assigned ST2040). This is a
-                      result, not missing data, and must surface as one.
-      "no_data"    -- missing/malformed file, or an all-dash row (the
-                      Snakefile writes one when the mlst run itself
-                      failed), so nothing was typed at all.
-    """
+    This parser deliberately does NOT interpret. The bare ST column is
+    overloaded -- a '-' can mean a genuinely unassigned novel profile or
+    incomplete allele recovery -- and the Snakefile's mlst rule hides a
+    failed run behind an all-dash fallback row ("<file>\\t-\\t-\\n": no
+    scheme, no alleles) via `|| true`. Interpretation lives in
+    build_assembly_block, which crosses this raw state with the assembly
+    QC gate. row_present is True only for a plausible tseemann row: a
+    real scheme name in column 2 (the fallback row has '-' there).
+    alleles preserves the raw allele columns in scheme order, '-'
+    entries included, so a partial profile stays visible as one."""
+    empty = {"st": None, "scheme": None, "alleles": [], "row_present": False}
     try:
         with open(path) as f:
             for line in f:
@@ -392,24 +390,27 @@ def parse_mlst_result(path):
                     continue
                 parts = line.rstrip("\n").split("\t")
                 if len(parts) < 3:
-                    return {"st": None, "st_status": "no_data"}
+                    return dict(empty)
+                scheme = parts[1].strip()
+                if scheme in ("-", ""):
+                    return dict(empty)
                 st = parts[2].strip()
-                if st not in ("-", ""):
-                    return {"st": st, "st_status": "assigned"}
-                alleles = [p.strip() for p in parts[3:]]
-                if any(a not in ("-", "") for a in alleles):
-                    return {"st": None, "st_status": "unassigned"}
-                return {"st": None, "st_status": "no_data"}
+                return {
+                    "st": st if st not in ("-", "") else None,
+                    "scheme": scheme,
+                    "alleles": [p.strip() for p in parts[3:]],
+                    "row_present": True,
+                }
     except OSError:
         pass
-    return {"st": None, "st_status": "no_data"}
+    return dict(empty)
 
 
 def parse_mlst(path):
     """ST string from tseemann/mlst TSV output (file, scheme, ST, alleles...).
     '-' or missing -> None. Never raises on malformed input.
-    (Kept for existing callers; parse_mlst_result also reports whether a
-    '-' ST was an unassigned novel profile or no data at all.)"""
+    (Kept for existing callers; parse_mlst_result returns the raw TSV
+    state that build_assembly_block interprets.)"""
     return parse_mlst_result(path)["st"]
 
 
@@ -463,37 +464,58 @@ def parse_amrfinder(path):
 
 
 def build_assembly_block(stats, mlst_st, lineage, amr_genes, gate_status,
-                         mlst_st_status=None):
+                         mlst_result=None):
     """The report.json 'assembly' block. lineage/amr_genes are None/[]
     unless gate_status is 'pass' -- a failing assembly never yields calls.
 
-    mlst_st_status (from parse_mlst_result) distinguishes an MLST run
-    that typed the loci but matched no known ST ("unassigned") from one
-    that produced nothing ("no_data"); when omitted it is derived from
-    mlst_st ("assigned" if an ST is present, else "no_data"). On a
-    passing gate the block also carries a 'classification' label, so an
-    unassigned ST is a distinct, visible result -- "V. cholerae,
-    unassigned ST" -- never a silent null indistinguishable from a
-    failed typing run. Species in the label is the pipeline's kraken
-    classification for the same sample (see the report's classification
-    block); this block only renders the typing outcome."""
-    if mlst_st_status is None:
-        mlst_st_status = "assigned" if mlst_st else "no_data"
+    mlst_call is the tri-state typing outcome, derived from the RAW mlst
+    TSV state (parse_mlst_result, passed as mlst_result) crossed with the
+    gate -- never from the ST value alone, because mlst_st null is
+    overloaded three ways (unassigned profile; failed/hidden mlst run;
+    deliberate gate suppression at this block):
+
+      "assigned"          -- gate passed and the TSV carries an ST.
+      "unassigned"        -- gate passed and a real tseemann row (scheme
+                             present) has ST '-': the loci were typed and
+                             the profile matched no known ST in the
+                             tool's database (e.g. HL2601, whose profile
+                             matched nothing in PubMLST until the curator
+                             assigned ST2040). A distinct, reportable
+                             result -- not a negative, not missing data.
+      "not_interpretable" -- everything else: gate failed (even when the
+                             TSV carries an ST), TSV missing/empty, or
+                             the all-dash fallback row of a failed mlst
+                             run. Deliberately distinct from "unassigned".
+
+    mlst_alleles preserves the raw allele profile (scheme order, '-'
+    for unrecovered loci) whenever a real TSV row exists, on any gate
+    outcome -- it is evidence for a human reader, not a call. Scope:
+    this block exists only on the assembly tier; the lite tier has no
+    ST. Legacy callers passing only mlst_st get "assigned" when an ST
+    is present on a passing gate, else "not_interpretable"."""
     passed = gate_status == "pass"
-    classification = None
-    if passed:
-        if mlst_st_status == "assigned" and mlst_st:
-            classification = f"V. cholerae, ST{mlst_st}"
-        elif mlst_st_status == "unassigned":
-            classification = "V. cholerae, unassigned ST"
+    if mlst_result is None:
+        mlst_result = {
+            "st": mlst_st,
+            "scheme": None,
+            "alleles": [],
+            "row_present": mlst_st is not None,
+        }
+    if not passed or not mlst_result.get("row_present"):
+        mlst_call = "not_interpretable"
+    elif mlst_result.get("st"):
+        mlst_call = "assigned"
+    else:
+        mlst_call = "unassigned"
     block = {
         "length_bp": stats["length_bp"],
         "contigs": stats["contigs"],
         "n50_bp": stats["n50_bp"],
         "qc_gate": gate_status,
         "mlst_st": mlst_st if passed else None,
-        "st_status": mlst_st_status if passed else None,
-        "classification": classification,
+        "mlst_call": mlst_call,
+        "mlst_scheme": mlst_result.get("scheme"),
+        "mlst_alleles": list(mlst_result.get("alleles") or []),
         "vibecheck_lineage": lineage if passed else None,
         "amr_genes": sorted(set(amr_genes)) if passed else [],
         "amr_note": AMR_NOTE,
@@ -881,15 +903,16 @@ def plasmid_screen(amr_genes):
     }
 
 
-# --- Virulence-marker line (ctxAB / tcpA / rtxA / hlyA / T6SS) ---------------
+# --- Reference-similarity marker panel (view over surveillance loci) ---------
 
-VIRULENCE_MARKER_NOTE = (
-    "Marker presence/absence vs the 2010EL-1786 loci panel only "
-    "(mapping breadth). 'toxigenic' means the ctxAB cholera-toxin genes "
-    "were detected; it is not a clinical or virulence prediction."
+REFERENCE_MARKERS = ("ctxA", "tcpA", "rtxA", "hlyA")
+
+REFERENCE_MARKERS_NOTE = (
+    "Presence/absence is mapping breadth against the O1 2010EL-1786 "
+    "reference allele at each locus (reference similarity), not gene "
+    "detection: a divergent non-O1 allele can be present in the sample "
+    "yet score absent against this reference."
 )
-
-_CTX_PAIR = ("ctxA", "ctxB")
 
 
 def _locus_call(loci_calls, name):
@@ -901,40 +924,23 @@ def _locus_call(loci_calls, name):
     return entry.get("call")
 
 
-def virulence_markers(loci_calls):
-    """Five-marker virulence line rolled up from surveillance-loci calls:
-    ctxAB (ctxA + ctxB combined), tcpA, rtxA, hlyA, and the type VI
-    secretion system (t6ss, via the hcp core-gene locus).
-
-    The call vocabulary mirrors call_loci (present / absent / partial),
-    plus not_assessed when a locus is missing from the panel. ctxAB is
-    present only when BOTH ctxA and ctxB are present and absent only
-    when both are absent -- the same both-required logic the watch
-    rules use for toxigenic calls; anything in between is partial.
-    'toxigenic' is True when ctxAB is present, False when absent, and
-    None when ctxAB is partial or not assessed. This is a reporting
-    rollup of loci calls already produced, not a new detection pass."""
-    def single(name):
+def reference_marker_panel(loci_calls):
+    """Named view grouping four surveillance-loci calls (ctxA, tcpA,
+    rtxA, hlyA) that call_loci already produced -- a reporting grouping
+    in the lite-tier report, not a new screen and not an assembly-tier
+    addition. Calls pass through unchanged (present / absent /
+    partial); a locus missing from the panel reads not_assessed. The
+    semantics are the loci BED's own -- mapping breadth vs the
+    2010EL-1786 allele -- so the block is labeled reference-similarity
+    and the caveat note travels with it wherever it is rendered."""
+    markers = {}
+    for name in REFERENCE_MARKERS:
         call = _locus_call(loci_calls, name)
-        return call if call is not None else "not_assessed"
-
-    pair = [_locus_call(loci_calls, g) for g in _CTX_PAIR]
-    if any(c is None for c in pair):
-        ctxab = "not_assessed"
-    elif all(c == "present" for c in pair):
-        ctxab = "present"
-    elif all(c == "absent" for c in pair):
-        ctxab = "absent"
-    else:
-        ctxab = "partial"
+        markers[name] = call if call is not None else "not_assessed"
     return {
-        "ctxAB": {"call": ctxab, "loci": list(_CTX_PAIR)},
-        "tcpA": {"call": single("tcpA")},
-        "rtxA": {"call": single("rtxA")},
-        "hlyA": {"call": single("hlyA")},
-        "t6ss": {"call": single("hcp"), "locus": "hcp"},
-        "toxigenic": {"present": True, "absent": False}.get(ctxab),
-        "note": VIRULENCE_MARKER_NOTE,
+        "markers": markers,
+        "basis": "reference_similarity:2010EL-1786",
+        "note": REFERENCE_MARKERS_NOTE,
     }
 
 
